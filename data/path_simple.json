@@ -1,0 +1,36 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {
+    "name": "Simple Loop",
+    "description": "A basic closed-loop path with two groups"
+  },
+  "nodes": [
+    {"id": 0, "x": 0.0, "y": 0.0, "z": 0.0, "group": 0, "tags": ["start"]},
+    {"id": 1, "x": 50.0, "y": 0.0, "z": 2.0, "group": 0, "tags": []},
+    {"id": 2, "x": 150.0, "y": 30.0, "z": 8.0, "group": 0, "tags": []},
+    {"id": 3, "x": 300.0, "y": 80.0, "z": 15.0, "group": 0, "tags": []},
+    {"id": 4, "x": 450.0, "y": 120.0, "z": 25.0, "group": 0, "tags": []},
+    {"id": 5, "x": 500.0, "y": 130.0, "z": 30.0, "group": 0, "tags": ["end", "junction"]},
+    {"id": 6, "x": 500.0, "y": 130.0, "z": 28.0, "group": 1, "tags": ["junction"]},
+    {"id": 7, "x": 450.0, "y": 120.0, "z": 23.0, "group": 1, "tags": []},
+    {"id": 8, "x": 300.0, "y": 80.0, "z": 13.0, "group": 1, "tags": []},
+    {"id": 9, "x": 150.0, "y": 30.0, "z": 6.0, "group": 1, "tags": []},
+    {"id": 10, "x": 50.0, "y": 0.0, "z": 0.0, "group": 1, "tags": []},
+    {"id": 11, "x": 0.0, "y": 0.0, "z": -2.0, "group": 1, "tags": ["junction", "anchor"]}
+  ],
+  "links": [
+    {"source": 0, "target": 1},
+    {"source": 1, "target": 2},
+    {"source": 2, "target": 3},
+    {"source": 3, "target": 4},
+    {"source": 4, "target": 5},
+    {"source": 5, "target": 6},
+    {"source": 6, "target": 7},
+    {"source": 7, "target": 8},
+    {"source": 8, "target": 9},
+    {"source": 9, "target": 10},
+    {"source": 10, "target": 11},
+    {"source": 11, "target": 0}
+  ]
+}
