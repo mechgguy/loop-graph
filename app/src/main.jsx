@@ -144,7 +144,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const margin = { top: 32, right: 24, bottom: 40, left: 56 };
 
   const carryRows = sortedByStrand(rows, 'Carry');
-  const returnRows = sortedByStrand(rows, 'Return');
+  const returnRows = sortedByStrand(rows, 'Return').reverse(); // Reverse Return for natural flow in side view (6->11 descending X)
   
   // Calculate cumulative arc length for stretched view
   const getArcData = (strandRows, startOffset = 0) => {
@@ -159,7 +159,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   // For stretched view, Return strand should continue from Carry strand's end
   const carryArc = getArcData(carryRows, 0);
   const carryTotalLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
-  const returnArc = getArcData(returnRows, carryTotalLength);
+  const returnArc = getArcData(returnRows, 0);
   
   // For stretched side view, use cumulative arc length as X
   const getDataForDisplay = () => {
@@ -194,10 +194,8 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   
   // For line drawing, use the natural order of each strand
   const getRowsForLine = (strandRows, strandType) => {
-    if (mode === 'side' && !stretched) {
-      // For projected side view, don't sort! Keep the natural flow order
-      // Carry flows left to right (ascending X), Return flows right to left (descending X)
-      return strandRows;
+    if (mode === 'side') {
+      return strandRows; // IMPORTANT: already ordered correctly (carry + reversed return)
     }
     return strandRows;
   };
@@ -302,7 +300,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       
       {mode === 'side' && stretched && (
         <div style={{ 
-          fontSize: '11px', 
+          fontSize: '15px', 
           color: '#888', 
           marginBottom: '12px', 
           textAlign: 'center',
@@ -310,9 +308,8 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           background: 'rgba(0,0,0,0.2)',
           borderRadius: '4px'
         }}>
-          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
+          Total stretched length: {totalCarryLength.toFixed(0)}m
           <span style={{ marginLeft: '12px', fontSize: '10px' }}>
-            (X-axis shows true belt length)
           </span>
         </div>
       )}
@@ -1090,7 +1087,7 @@ function App() {
           <section className="visual-area">
             <div className="left-plots">
               <MiniPlot
-                title="SIDE VIEW (STRETCHED)"
+                title="SIDE VIEW"
                 mode="side"
                 rows={rows}
                 selectedId={selectedId}
@@ -1099,7 +1096,7 @@ function App() {
               />
 
               <MiniPlot
-                title="TOP VIEW (PLAN)"
+                title="TOP VIEW"
                 mode="top"
                 rows={rows}
                 selectedId={selectedId}
