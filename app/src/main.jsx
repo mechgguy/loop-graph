@@ -144,7 +144,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const margin = { top: 32, right: 24, bottom: 40, left: 56 };
 
   const carryRows = sortedByStrand(rows, 'Carry');
-  const returnRows = sortedByStrand(rows, 'Return').reverse(); // Reverse Return for natural flow in side view (6->11 descending X)
+  const returnRows = sortedByStrand(rows, 'Return');
   
   // Calculate cumulative arc length for stretched view
   const getArcData = (strandRows, startOffset = 0) => {
@@ -159,7 +159,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   // For stretched view, Return strand should continue from Carry strand's end
   const carryArc = getArcData(carryRows, 0);
   const carryTotalLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
-  const returnArc = getArcData(returnRows, 0);
+  const returnArc = getArcData(returnRows, carryTotalLength);
   
   // For stretched side view, use cumulative arc length as X
   const getDataForDisplay = () => {
@@ -194,8 +194,10 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   
   // For line drawing, use the natural order of each strand
   const getRowsForLine = (strandRows, strandType) => {
-    if (mode === 'side') {
-      return strandRows; // IMPORTANT: already ordered correctly (carry + reversed return)
+    if (mode === 'side' && !stretched) {
+      // For projected side view, don't sort! Keep the natural flow order
+      // Carry flows left to right (ascending X), Return flows right to left (descending X)
+      return strandRows;
     }
     return strandRows;
   };
@@ -300,7 +302,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       
       {mode === 'side' && stretched && (
         <div style={{ 
-          fontSize: '15px', 
+          fontSize: '11px', 
           color: '#888', 
           marginBottom: '12px', 
           textAlign: 'center',
@@ -308,8 +310,9 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           background: 'rgba(0,0,0,0.2)',
           borderRadius: '4px'
         }}>
-          Total stretched length: {totalCarryLength.toFixed(0)}m
+          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
           <span style={{ marginLeft: '12px', fontSize: '10px' }}>
+            (X-axis shows true belt length)
           </span>
         </div>
       )}
@@ -448,21 +451,31 @@ function createMineGroundTexture() {
   return texture;
 }
 
-function addTerrainMesh(scene) {
-  // Add Terrain Mesh
-  const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
-  const textureLoader = new THREE.TextureLoader();
+function addTerrainMesh(imageUrl = "/Highland_valley.png") {
+  // // Add Terrain Mesh
+  // const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
+  // const material = new THREE.MeshStandardMaterial({
+  //   color: 0x964B00,
+  //   displacementScale: 200, // Adjust based on your heightmap's contrast
+  //   wireframe: true,
+  // });
+
+  // const terrain = new THREE.Mesh(geometry, material);
+  // // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
+  // terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
     
-  // Loads from the 'public' folder in Vite
-  const heightmapTexture = textureLoader.load("/Heightmap_Joy2.png", () => {
-    material.needsUpdate = true;
-  });
-  heightmapTexture.wrapS = heightmapTexture.wrapT = THREE.RepeatWrapping;
-  heightmapTexture.repeat.set(1,1);
-  
+  // // Loads from the 'public' folder in Vite
+  // const textureLoader = new THREE.TextureLoader();
+  // textureLoader.load(imageUrl, (texture) => {
+  //   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  //   texture.repeat.set(1, 1);
+  //   material.displacementMap = texture;
+  //   material.needsUpdate = true;
+
+    // Add Terrain Mesh
+  const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
   const material = new THREE.MeshStandardMaterial({
     color: 0x964B00,
-    displacementMap: heightmapTexture,
     displacementScale: 200, // Adjust based on your heightmap's contrast
     wireframe: true,
   });
@@ -470,6 +483,16 @@ function addTerrainMesh(scene) {
   const terrain = new THREE.Mesh(geometry, material);
   // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
   terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
+    
+  // Loads from the 'public' folder in Vite
+  const textureLoader = new THREE.TextureLoader();
+  textureLoader.load(imageUrl, (texture) => {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    material.displacementMap = texture;
+    material.needsUpdate = true;
+  });
+
   return terrain
 }
 
@@ -712,12 +735,13 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
   });
 }
 
-function View3D({ rows, selectedId, onSelect }) {
+function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
   const controlsRef = useRef(null);
   const sceneRef = useRef(null);
+  const terrainRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -762,7 +786,8 @@ function View3D({ rows, selectedId, onSelect }) {
     scene.add(fill);
 
     // TERRAIN FUNCTION
-    const terrain = addTerrainMesh(scene);
+    const terrain = addTerrainMesh(heightmapUrl);
+    terrainRef.current = terrain; 
     scene.add(terrain);
 
     // TERRAIN FUNCTION
@@ -861,7 +886,7 @@ function View3D({ rows, selectedId, onSelect }) {
       renderer.dispose();
       container.innerHTML = '';
     };
-  }, [onSelect]);
+  }, []);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -894,6 +919,20 @@ function View3D({ rows, selectedId, onSelect }) {
       controls.update();
     }
   }, [rows, selectedId]);
+
+  useEffect(() => {
+    if (!terrainRef.current || !heightmapUrl) return;
+    
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(heightmapUrl, (newTexture) => {
+      newTexture.wrapS = newTexture.wrapT = THREE.RepeatWrapping;
+      newTexture.repeat.set(1, 1);
+      
+      const material = terrainRef.current.material;
+      material.displacementMap = newTexture;
+      material.needsUpdate = true;
+    });
+  }, [heightmapUrl]);
 
   return (
     <section className="view3d">
@@ -963,6 +1002,8 @@ function App() {
   const [rows, setRows] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [status, setStatus] = useState('Loading path_simple.csv...');
+
+  const [heightmapUrl, setHeightmapUrl] = useState('/Heightmap_Joy2.png');
 
   useEffect(() => {
     fetch(DEFAULT_CSV_PATH)
@@ -1072,6 +1113,21 @@ function App() {
           Upload CSV
         </label>
 
+         <label className="tool-btn">
+          <input
+            type="file"
+            accept="image/png, image/jpeg"
+            onChange={(e) => {
+              if (e.target.files?.[0]) {
+                const url = URL.createObjectURL(e.target.files[0]);
+                setHeightmapUrl(url);
+                setStatus('Loaded custom heightmap');
+              }
+            }}
+          />
+          Upload Heightmap
+        </label>
+
         <button className="primary" onClick={addNode}>+ Add Node</button>
         <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
           Delete Node
@@ -1087,7 +1143,7 @@ function App() {
           <section className="visual-area">
             <div className="left-plots">
               <MiniPlot
-                title="SIDE VIEW"
+                title="SIDE VIEW (STRETCHED)"
                 mode="side"
                 rows={rows}
                 selectedId={selectedId}
@@ -1096,7 +1152,7 @@ function App() {
               />
 
               <MiniPlot
-                title="TOP VIEW"
+                title="TOP VIEW (PLAN)"
                 mode="top"
                 rows={rows}
                 selectedId={selectedId}
@@ -1105,7 +1161,7 @@ function App() {
               />
             </div>
 
-            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} />
+            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} heightmapUrl={heightmapUrl} />
           </section>
 
           <NodeTable rows={rows} selectedId={selectedId} onSelect={setSelected} onEdit={updateNode} />
