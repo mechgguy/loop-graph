@@ -1214,17 +1214,61 @@ function App() {
         z: last.z,
         tags: ''
       };
-  
-      // 5. Update Status and Selection (Side effects)
-      // We use setTimeout to move these out of the render-cycle calculation
-      setTimeout(() => {
-        setSelectedId(newId);
-        setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
-      }, 0);
-  
       return [...currentRows, newNode];
     });
   }
+
+  function addNodeAfter() {
+    if (selectedId === null) {
+      setStatus("Select a node first to insert after it!");
+      return;
+    }
+
+    setRows((currentRows) => {
+      // 1. Find where the selected node is in the array
+      const currentIndex = currentRows.findIndex(r => r.id === selectedId);
+      if (currentIndex === -1) return currentRows;
+
+      const selectedNode = currentRows[currentIndex];
+      const nextNode = currentRows[currentIndex + 1];
+
+      // 2. Generate the "Sub-ID" (e.g., 5 becomes 5a)
+      // If adding after 5a, it becomes 5aa
+      const newId = Math.max(...currentRows.map(r => Number(r.id) || 0)) + 1;
+
+      // 3. Calculate position (midpoint between current and next, or just offset)
+      const newNode = {
+        ...selectedNode, // Inherit strand, group, strandValue
+        id: newId,
+        // Place it physically between the current and next node if next exists
+        x: nextNode ? (selectedNode.x + nextNode.x) / 2 : selectedNode.x + 25,
+        y: nextNode ? (selectedNode.y + nextNode.y) / 2 : selectedNode.y + 25,
+        z: nextNode ? (selectedNode.z + nextNode.z) / 2 : selectedNode.z,
+        fromCsv: false,
+        tags: `Inserted after ${selectedId}`
+      };
+
+      // 4. Splice into the array to maintain visual path order
+      const updatedRows = [...currentRows];
+      updatedRows.splice(currentIndex + 1, 0, newNode);
+
+      // 5. Update Selection/Status
+      setTimeout(() => {
+        setSelectedId(newId);
+        setStatus(`Inserted Node ${newId} between ${selectedId} and ${nextNode?.id || 'End'}`);
+      }, 0);
+
+      return updatedRows;
+    });
+  }
+
+  // 5. Update Status and Selection (Side effects)
+  // We use setTimeout to move these out of the render-cycle calculation
+  setTimeout(() => {
+    setSelectedId(newId);
+    setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
+  }, 0);
+
 
   function deleteNode() {
     if (selectedId === null) return;
@@ -1345,8 +1389,15 @@ function App() {
           />
           Upload CSV
         </label>
-        
-        <button className="primary" onClick={addNode}>+ Add Node</button>
+        <button 
+          className="primary" 
+          onClick={addNodeAfter} 
+          disabled={selectedId === null}
+          style={{ backgroundColor: '#2e7d32' }} // Darker green to differentiate
+        >
+          + Insert After ({selectedId ?? '?'})
+        </button>
+        {/* <button className="primary" onClick={addNode}>+ Add Node</button> */}
         {/* NEW TOGGLE BUTTON */}
         <button 
             onClick={toggleStrand} 
@@ -1429,4 +1480,4 @@ function App() {
     </main>
   );
 }
-
+// createRoot(document.getElementById('root')).render(<App />);
