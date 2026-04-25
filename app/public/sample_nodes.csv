@@ -1,0 +1,14 @@
+id,strand,x,y,z,tags
+0,Carry,0,0,0,tail; feed
+1,Carry,50,0,2,
+2,Carry,150,30,8,
+3,Carry,300,80,15,
+4,Carry,459.55,42.9,25,
+5,Carry,500,130,4.23,
+6,Carry,487.21,95.87,5.19,head; discharge; pulley; motor
+7,Return,360,100,28,
+8,Return,410,95,24,
+9,Return,500,93,18,
+10,Return,590,90,11,
+11,Return,630,75,6,
+12,Return,600,105,4,
