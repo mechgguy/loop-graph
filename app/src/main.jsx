@@ -675,7 +675,7 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
 }
 
 // --- View3D (merged: grid constants, terrain hint, two-scale, but multi-select from 3D click is single select) ---
-function View3D({ rows, selectedId, onSelect, planeScale, zScale, heightmapUrl }) {
+function View3D({ rows, selectedId, selectedIds, planeScale, zScale, heightmapUrl, onSelect }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
@@ -864,6 +864,39 @@ function View3D({ rows, selectedId, onSelect, planeScale, zScale, heightmapUrl }
     });
   }, [heightmapUrl]);
 
+  useEffect(() => {
+    function handleKeyDown(e) {
+      // 1. CTRL + Z (Undo)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undo();
+      }
+  
+      // 2. Select All (Alt + A)
+      if (e.altKey && e.key === 'a') {
+        e.preventDefault();
+        if (rows.length > 0) {
+          const allIds = new Set(rows.map(r => r.id));
+          setSelectedIds(allIds);
+          setLastSelectedId(rows[rows.length - 1].id);
+          setStatus(`Selected all ${rows.length} nodes`);
+        }
+      }
+  
+      // 3. Delete / Backspace
+      if ((e.key === 'Delete' || e.key === 'Backspace') &&
+          e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (selectedIds.size > 0) {
+          recordHistory(); // Record before deleting
+          deleteNode();
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [rows, selectedIds, history]); // Added history to deps
+
   const terrainFootprint = TERRAIN_SIZE * planeScale;
   const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
 
@@ -951,6 +984,7 @@ function App() {
   const [heightSampler, setHeightSampler] = useState(null);
   const [planeScale, setPlaneScale] = useState(1);
   const [zScale, setZScale] = useState(1);
+  const [history, setHistory] = useState([]);
 
   // Load default CSV
   useEffect(() => {
@@ -1037,6 +1071,7 @@ function App() {
 
   // Update single node
   function updateNode(id, patch) {
+    recordHistory();
     setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
     setFittedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
   }
@@ -1071,12 +1106,39 @@ function App() {
     }
   }
 
+  function recordHistory() {
+    // Store a deep copy of the rows to the history stack
+    setHistory(prev => [...prev, JSON.parse(JSON.stringify(rows))].slice(-30));
+  }
+
+  function undo() {
+    if (history.length === 0) {
+      setStatus("Nothing to undo.");
+      return;
+    }
+    const previousState = history[history.length - 1];
+    setRows(previousState);
+    setHistory(prev => prev.slice(0, -1));
+    setStatus("Undo successful.");
+  }
+
+  function clearAllNodes() {
+    if (window.confirm("Delete ALL nodes from the workspace?")) {
+      recordHistory();
+      setRows([]);
+      setSelectedIds(new Set());
+      setLastSelectedId(null);
+      setFittedIds(new Set());
+      setStatus("Workspace cleared.");
+    }
+  }
   // FIT nodes with clearance rule (tmp3)
   function fitNodesToWireframe() {
     if (!heightSampler || !rows.length) {
       setStatus('Heightmap is not ready yet.');
       return;
     }
+    recordHistory();
     const xs = rows.map(r => r.x);
     const ys = rows.map(r => r.y);
     const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -1119,6 +1181,7 @@ function App() {
 
   // Add node (main.jsx with template)
   function addNode() {
+    recordHistory();
     setRows(currentRows => {
       const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
       const newId = maxId + 1;
@@ -1149,6 +1212,7 @@ function App() {
       setStatus("Select a node first to insert after it!");
       return;
     }
+    recordHistory();
     setRows(currentRows => {
       const currentIndex = currentRows.findIndex(r => r.id === lastSelectedId);
       if (currentIndex === -1) return currentRows;
@@ -1194,6 +1258,7 @@ function App() {
 
   function toggleStrand() {
     if (selectedIds.size === 0) return;
+    recordHistory();
     setRows(prev => prev.map(r => {
       if (selectedIds.has(r.id)) {
         const isCurrentlyCarry = r.strand === 'Carry';
@@ -1288,13 +1353,26 @@ function App() {
           <input type="number" min="0" max="20" step="0.05" value={zScale}
             onChange={(e) => updateZScale(e.target.value)} />
         </label>
+        <button 
+        className="danger" 
+        onClick={clearAllNodes}
+        style={{ marginLeft: '10px' }}
+      >
+        🗑️ Clear All
+      </button>
 
+      <button 
+        onClick={undo} 
+        disabled={history.length === 0}
+      >
+        ↩️ Undo (Ctrl+Z)
+      </button>
         <button onClick={resetAll}>RESET ALL</button>
         <button className="primary" onClick={addNode}>+ Add Node</button>
         <button className="danger" disabled={selectedIds.size === 0} onClick={deleteNode}>Delete Node</button>
         <button onClick={() => exportFile('csv')}>Export CSV</button>
         <button onClick={() => exportFile('json')}>Export JSON</button>
-        <span className="status">{status}</span>
+                <span className="status">{status}</span>
       </div>
 
       {rows.length > 0 && (
@@ -1308,7 +1386,7 @@ function App() {
                 selectedIds={selectedIds} onSelect={setSelected}
                 onDragNode={updateNode} onDragMultipleNodes={updateMultipleNodes} />
             </div>
-            <View3D rows={rows} selectedId={lastSelectedId} onSelect={onSelect3D}
+            <View3D rows={rows} selectedId={lastSelectedId} selectedIds={selectedIds} onSelect={onSelect3D}
               planeScale={planeScale} zScale={zScale} heightmapUrl={heightmapUrl} />
           </section>
           <NodeTable rows={rows} selectedIds={selectedIds} fittedIds={fittedIds}
