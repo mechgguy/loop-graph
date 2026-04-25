@@ -395,7 +395,6 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           </span>
         </div>
       )}
-      <h3>{title}</h3>
 
       <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
         <g className="gridlines">
@@ -460,7 +459,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 
         {dataByStrand.map(
           (strandData) =>
-            strandData.length > 1 && (
+            strandData.rows.length > 1 && (
               <path
                 key={strandData.strand}
                 className={strandData.strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
@@ -497,7 +496,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 function addTerrainMesh(terrainScale, heightmapUrl) {
   const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
 
-  const geometry = new THREE.PlaneGeometry(effectiveTerrainSize, effectiveTerrainSize, 1000, 1000);
+  const geometry = new THREE.PlaneGeometry(effectiveTerrainSize, effectiveTerrainSize, 128, 128);
   const textureLoader = new THREE.TextureLoader();
 
   const material = new THREE.MeshStandardMaterial({
@@ -777,6 +776,7 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
   });
   }
 
+
 function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
@@ -784,23 +784,88 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   const controlsRef = useRef(null);
   const sceneRef = useRef(null);
   const terrainRef = useRef(null);
+  const conveyorGroupRef = useRef(null);
+  
+  // Store camera state for terrain rebuilds
+  const savedCameraState = useRef({
+    position: new THREE.Vector3(520, -720, 420),
+    target: new THREE.Vector3(0, 0, 0)
+  });
 
+  // Function to rebuild conveyors
+  function rebuildConveyors(scene) {
+    if (!scene || rows.length === 0) return;
+
+    // Find or create conveyor group
+    let conveyorGroup = scene.getObjectByName('conveyorGroup');
+    if (!conveyorGroup) {
+      conveyorGroup = new THREE.Group();
+      conveyorGroup.name = 'conveyorGroup';
+      scene.add(conveyorGroup);
+      conveyorGroupRef.current = conveyorGroup;
+    }
+
+    // Clear old conveyor objects
+    while (conveyorGroup.children.length > 0) {
+      const obj = conveyorGroup.children[0];
+      conveyorGroup.remove(obj);
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    }
+
+    const xs = rows.map((r) => r.x);
+    const ys = rows.map((r) => r.y);
+    const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
+
+    function toVec(r) {
+      return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
+    }
+
+    // Override scene.add temporarily to add to conveyor group instead
+    const originalAdd = scene.add.bind(scene);
+    scene.add = (obj) => {
+      conveyorGroup.add(obj);
+    };
+
+    buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
+    buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
+
+    // Restore original add
+    scene.add = originalAdd;
+  }
+
+  // Main scene initialization - rebuilds only when terrain scale or heightmap changes
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    container.innerHTML = '';
+    // Save camera state if it exists
+    if (cameraRef.current && controlsRef.current) {
+      savedCameraState.current.position.copy(cameraRef.current.position);
+      savedCameraState.current.target.copy(controlsRef.current.target);
+    }
+
+    // Clear previous content
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x030711);
-    scene.fog = new THREE.Fog(0x030711, 900, 2600);
     sceneRef.current = scene;
 
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 10000);
-    camera.position.set(420, -720, 420);
+    const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 1000000);
+    camera.position.copy(savedCameraState.current.position);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -815,8 +880,11 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     controls.enablePan = true;
     controls.enableZoom = true;
     controls.enableRotate = true;
+    controls.target.copy(savedCameraState.current.target);
+    controls.update();
     controlsRef.current = controls;
 
+    // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 
     const sun = new THREE.DirectionalLight(0xffffff, 1.05);
@@ -827,15 +895,18 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     fill.position.set(-500, 400, 250);
     scene.add(fill);
 
+    // Add terrain
     const terrain = addTerrainMesh(terrainScale, heightmapUrl);
     terrainRef.current = terrain;
     scene.add(terrain);
 
+    // Add grid
     const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
     grid.rotation.x = Math.PI / 2;
     grid.position.z = 0.04;
     scene.add(grid);
 
+    // Add axes
     function axis(start, end, color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
       const material = new THREE.LineBasicMaterial({ color });
@@ -847,6 +918,7 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     axis(new THREE.Vector3(0, -1100, 0), new THREE.Vector3(0, 1100, 0), 0x55ff55);
     axis(new THREE.Vector3(0, 0, -250), new THREE.Vector3(0, 0, 500), 0x66aaff);
 
+    // Add labels
     const xLabel = makeTextSprite('X', '#ff6666');
     xLabel.position.set(1160, 0, 25);
     scene.add(xLabel);
@@ -859,11 +931,45 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     zLabel.position.set(0, 0, 540);
     scene.add(zLabel);
 
+    // Create conveyor group
+    const conveyorGroup = new THREE.Group();
+    conveyorGroup.name = 'conveyorGroup';
+    scene.add(conveyorGroup);
+    conveyorGroupRef.current = conveyorGroup;
+
+    // Build conveyors immediately after scene setup
+    if (rows.length > 0) {
+      const xs = rows.map((r) => r.x);
+      const ys = rows.map((r) => r.y);
+      const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
+
+      function toVec(r) {
+        return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
+      }
+
+      const originalAdd = scene.add.bind(scene);
+      scene.add = (obj) => {
+        conveyorGroup.add(obj);
+      };
+
+      buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
+      buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
+
+      scene.add = originalAdd;
+    }
+
+    // Click handling
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
     function onClick(event) {
-      const clickable = scene.children.filter((obj) => obj.userData?.row);
+      const clickable = [];
+      scene.traverse((obj) => {
+        if (obj.userData?.row) {
+          clickable.push(obj);
+        }
+      });
 
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -882,7 +988,6 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     function onResize() {
       const w = container.clientWidth;
       const h = container.clientHeight;
-
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
@@ -891,13 +996,11 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     window.addEventListener('resize', onResize);
 
     let frameId;
-
     function animate() {
       frameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
     }
-
     animate();
 
     return () => {
@@ -906,25 +1009,39 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       renderer.domElement.removeEventListener('click', onClick);
       controls.dispose();
       renderer.dispose();
-      container.innerHTML = '';
     };
-  }, [onSelect, terrainScale]);
+  }, [terrainScale, heightmapUrl]); // Only rebuild when these change
 
+  // Update conveyors when rows or selectedId change
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene || !rows.length) return;
+    if (!scene || rows.length === 0) return;
 
-    const oldObjects = scene.children.filter((obj) => obj.userData?.dynamicGraph);
+    // Find conveyor group
+    let conveyorGroup = scene.getObjectByName('conveyorGroup');
+    if (!conveyorGroup) {
+      conveyorGroup = new THREE.Group();
+      conveyorGroup.name = 'conveyorGroup';
+      scene.add(conveyorGroup);
+      conveyorGroupRef.current = conveyorGroup;
+    }
 
-    oldObjects.forEach((obj) => {
-      scene.remove(obj);
+    // Clear old conveyor objects
+    while (conveyorGroup.children.length > 0) {
+      const obj = conveyorGroup.children[0];
+      conveyorGroup.remove(obj);
       if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) obj.material.dispose();
-    });
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    }
 
     const xs = rows.map((r) => r.x);
     const ys = rows.map((r) => r.y);
-
     const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
     const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
 
@@ -932,18 +1049,20 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
     }
 
+    // Override scene.add to add to conveyor group
+    const originalAdd = scene.add.bind(scene);
+    scene.add = (obj) => {
+      conveyorGroup.add(obj);
+    };
+
     buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
     buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
 
-    const controls = controlsRef.current;
-    if (controls) {
-      controls.target.set(0, 0, 0);
-      controls.update();
-    }
-  }, [rows, selectedId, terrainScale]);
+    // Restore original add
+    scene.add = originalAdd;
+  }, [rows, selectedId]);
 
-
-  // Update terrain material when heightmapUrl changes
+  // Update terrain texture when heightmapUrl changes
   useEffect(() => {
     if (!terrainRef.current || !heightmapUrl) return;
 
@@ -966,11 +1085,11 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
           Drag rotate · Scroll zoom · Right-click pan · Click node · Wireframe scale {terrainScale.toFixed(2)}x
         </span>
       </div>
-
       <div ref={containerRef} className="three-container" />
     </section>
   );
 }
+
 
 function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
   return (
