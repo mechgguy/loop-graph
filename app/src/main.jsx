@@ -823,23 +823,39 @@ function App() {
   }
 
   function addNode() {
-    const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
-    const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
-
-    const node = {
-      id,
-      strand: 'Carry',
-      strandValue: -1,
-      group: 0,
-      x: last.x + 50,
-      y: last.y,
-      z: last.z,
-      tags: ''
-    };
-
-    setRows((r) => [...r, node]);
-    setSelectedId(id);
-    setStatus(`Added node ${id}`);
+    setRows((currentRows) => {
+      // 1. Calculate the new ID based on the MOST RECENT state
+      const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
+      const newId = maxId + 1;
+  
+      // 2. Find the template (selected node) from the MOST RECENT state
+      // We use the 'selectedId' from the outer scope
+      const selectedNode = currentRows.find(r => r.id === selectedId);
+      
+      // 3. Find the last node for positioning
+      const last = currentRows[currentRows.length - 1] ?? { x: 0, y: 0, z: 0 };
+  
+      // 4. Build the new node
+      const newNode = {
+        id: newId,
+        strand: selectedNode ? selectedNode.strand : 'Carry',
+        strandValue: selectedNode ? selectedNode.strandValue : -1,
+        group: selectedNode ? selectedNode.group : 0,
+        x: last.x + 50,
+        y: last.y,
+        z: last.z,
+        tags: ''
+      };
+  
+      // 5. Update Status and Selection (Side effects)
+      // We use setTimeout to move these out of the render-cycle calculation
+      setTimeout(() => {
+        setSelectedId(newId);
+        setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
+      }, 0);
+  
+      return [...currentRows, newNode];
+    });
   }
 
   function deleteNode() {
