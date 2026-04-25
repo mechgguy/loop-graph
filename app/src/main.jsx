@@ -217,19 +217,22 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const carryRows = sortedByStrand(rows, 'Carry');
   const returnRows = sortedByStrand(rows, 'Return').reverse();
 
+  // Calculate cumulative arc length for stretched view
   const getArcData = (strandRows, startOffset = 0) => {
     if (strandRows.length === 0) return [];
     let total = startOffset;
-
     return strandRows.map((r, i) => {
       if (i > 0) total += distanceHorizontal(strandRows[i - 1], r);
       return { ...r, arc: total };
     });
   };
 
+  // For stretched view, Return strand should continue from Carry strand's end
   const carryArc = getArcData(carryRows, 0);
-  const returnArc = getArcData(returnRows, 0);
+  const carryTotalLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
+  const returnArc = getArcData(returnRows, carryTotalLength);
 
+  // For stretched side view, use cumulative arc length as X
   const getDataForDisplay = () => {
     if (mode === 'side' && stretched) {
       return {
@@ -239,7 +242,10 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       };
     }
 
+    // For projected side view
     if (mode === 'side') {
+      // Keep original order for Carry (0->5 ascending X)
+      // Keep original order for Return (6->11 descending X)
       return {
         carry: carryRows,
         ret: returnRows,
@@ -247,6 +253,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       };
     }
 
+    // For top view, use original order
     return {
       carry: carryRows,
       ret: returnRows,
@@ -255,6 +262,16 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   };
 
   const displayData = getDataForDisplay();
+  
+  // For line drawing, use the natural order of each strand
+  const getRowsForLine = (strandRows, strandType) => {
+    if (mode === 'side' && !stretched) {
+      // For projected side view, don't sort! Keep the natural flow order
+      // Carry flows left to right (ascending X), Return flows right to left (descending X)
+      return strandRows;
+    }
+    return strandRows;
+  };
 
   const dataByStrand = [
     { strand: 'Carry', rows: displayData.carry },
@@ -286,7 +303,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     .line()
     .x((d) => x(xValue(d)))
     .y((d) => y(yValue(d)))
-    .defined(() => true);
+    .defined((d) => true);
 
   function startDrag(event, d) {
     event.preventDefault();
@@ -323,7 +340,9 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     return value.toFixed(0);
   };
 
+  // Calculate total length for display
   const totalCarryLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
+  const totalReturnLength = returnArc.length > 0 ? returnArc[returnArc.length - 1].arc - carryTotalLength : 0;
 
   return (
     <section className="plot-card">
@@ -368,9 +387,12 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
             padding: '4px 8px',
             background: 'rgba(0,0,0,0.2)',
             borderRadius: '4px'
-          }}
-        >
-          Total stretched length: {totalCarryLength.toFixed(0)}m
+          }}>
+          {/* Total stretched length: {totalCarryLength.toFixed(0)}m */}
+          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
+          <span style={{ marginLeft: '12px', fontSize: '10px' }}>
+            (X-axis shows true belt length)
+          </span>
         </div>
       )}
       <h3>{title}</h3>
@@ -398,6 +420,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           ))}
         </g>
 
+        {/* X-axis tick labels */}
         <g className="x-axis-labels" fontSize="10" fill="#999" textAnchor="middle">
           {x.ticks(8).map((t) => (
             <text key={`xtick${t}`} x={x(t)} y={h - margin.bottom + 15}>
@@ -406,6 +429,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           ))}
         </g>
 
+        {/* Y-axis tick labels */}
         <g className="y-axis-labels" fontSize="10" fill="#999" textAnchor="end">
           {y.ticks(5).map((t) => (
             <text key={`ytick${t}`} x={margin.left - 8} y={y(t) + 3}>
@@ -1141,29 +1165,65 @@ function App() {
         : `FIT complete: no nodes needed adjustment at ${terrainScale.toFixed(2)}x scale.`
     );
   }
+  // OLD ADDNODE
+  // function addNode() {
+  //   const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
+  //   const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
+
+  //   const node = {
+  //     id,
+  //     strand: 'Carry',
+  //     strandValue: -1,
+  //     group: 0,
+  //     x: last.x + 50,
+  //     y: last.y,
+  //     z: last.z,
+  //     originalZ: last.z,
+  //     tags: '',
+  //     fromCsv: false,
+  //     fittedToWireframe: false,
+  //     wireframeZ: null
+  //   };
+
+  //   setRows((r) => [...r, node]);
+  //   setSelectedId(id);
+  //   setStatus(`Added node ${id}`);
+  // }
 
   function addNode() {
-    const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
-    const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
-
-    const node = {
-      id,
-      strand: 'Carry',
-      strandValue: -1,
-      group: 0,
-      x: last.x + 50,
-      y: last.y,
-      z: last.z,
-      originalZ: last.z,
-      tags: '',
-      fromCsv: false,
-      fittedToWireframe: false,
-      wireframeZ: null
-    };
-
-    setRows((r) => [...r, node]);
-    setSelectedId(id);
-    setStatus(`Added node ${id}`);
+    setRows((currentRows) => {
+      // 1. Calculate the new ID based on the MOST RECENT state
+      const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
+      const newId = maxId + 1;
+  
+      // 2. Find the template (selected node) from the MOST RECENT state
+      // We use the 'selectedId' from the outer scope
+      const selectedNode = currentRows.find(r => r.id === selectedId);
+      
+      // 3. Find the last node for positioning
+      const last = currentRows[currentRows.length - 1] ?? { x: 0, y: 0, z: 0 };
+  
+      // 4. Build the new node
+      const newNode = {
+        id: newId,
+        strand: selectedNode ? selectedNode.strand : 'Carry',
+        strandValue: selectedNode ? selectedNode.strandValue : -1,
+        group: selectedNode ? selectedNode.group : 0,
+        x: last.x + 50,
+        y: last.y,
+        z: last.z,
+        tags: ''
+      };
+  
+      // 5. Update Status and Selection (Side effects)
+      // We use setTimeout to move these out of the render-cycle calculation
+      setTimeout(() => {
+        setSelectedId(newId);
+        setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
+      }, 0);
+  
+      return [...currentRows, newNode];
+    });
   }
 
   function deleteNode() {

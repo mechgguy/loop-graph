@@ -330,7 +330,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           </span>
         </div>
       )}
-      {/* <h3>{title}</h3> */}
+      <h3>{title}</h3>
 
       <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
         <g className="gridlines">
@@ -632,7 +632,6 @@ function addRoller(scene, position, tangent, width, selected = false) {
   const roller = new THREE.Mesh(geometry, material);
 
   roller.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), side);
-
   roller.position.copy(position);
   roller.position.z += 0.2;
   roller.userData.dynamicGraph = true;
