@@ -308,6 +308,31 @@ function createMineGroundTexture() {
   return texture;
 }
 
+function addTerrainMesh(scene) {
+  // Add Terrain Mesh
+  const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
+  const textureLoader = new THREE.TextureLoader();
+    
+  // Loads from the 'public' folder in Vite
+  const heightmapTexture = textureLoader.load("/Heightmap_Joy2.png", () => {
+    material.needsUpdate = true;
+  });
+  heightmapTexture.wrapS = heightmapTexture.wrapT = THREE.RepeatWrapping;
+  heightmapTexture.repeat.set(1,1);
+  
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x964B00,
+    displacementMap: heightmapTexture,
+    displacementScale: 200, // Adjust based on your heightmap's contrast
+    wireframe: true,
+  });
+
+  const terrain = new THREE.Mesh(geometry, material);
+  // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
+  terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
+  return terrain
+}
+
 function makeTextSprite(text, color = '#ffffff') {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
@@ -596,23 +621,28 @@ function View3D({ rows, selectedId, onSelect }) {
     fill.position.set(-500, 400, 250);
     scene.add(fill);
 
-    const groundGeometry = new THREE.PlaneGeometry(2600, 2600, 120, 120);
-    const groundTexture = createMineGroundTexture();
+    // TERRAIN FUNCTION
+    const terrain = addTerrainMesh(scene);
+    scene.add(terrain);
 
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      map: groundTexture,
-      roughness: 1,
-      metalness: 0,
-      color: 0xd1b078,
-      transparent: true,
-      opacity: 0.82,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
+    // TERRAIN FUNCTION
+    // const groundGeometry = new THREE.PlaneGeometry(2600, 2600, 120, 120);
+    // const groundTexture = createMineGroundTexture();
 
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.position.z = 0;
-    scene.add(ground);
+    // const groundMaterial = new THREE.MeshStandardMaterial({
+    //   map: groundTexture,
+    //   roughness: 1,
+    //   metalness: 0,
+    //   color: 0xd1b078,
+    //   transparent: true,
+    //   opacity: 0.82,
+    //   side: THREE.DoubleSide,
+    //   depthWrite: false
+    // });
+
+    // const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    // ground.position.z = 0;
+    // scene.add(ground);
 
     const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
     grid.rotation.x = Math.PI / 2;
