@@ -7,12 +7,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import './styles.css';
 
+// --- constants (merged: grid constants from tmp3, clearance constants from tmp3, colours from both) ---
 const RETURN = '#e52b2f';
 const CARRY = '#0037d8';
 const DEFAULT_CSV_PATH = '/path_simple.csv';
 
-const TERRAIN_SIZE = 1000; // metres at planeScale = 1
-const TERRAIN_DISPLACEMENT_SCALE = 200; // metres at zScale = 1
+const TERRAIN_SIZE = 1000;               // metres at planeScale = 1
+const TERRAIN_DISPLACEMENT_SCALE = 200;  // metres at zScale = 1
 const HEIGHTMAP_PATH = '/Heightmap_Joy2.png';
 
 const GRID_SIZE_METERS = 2600;
@@ -21,6 +22,7 @@ const GRID_SPACING_METERS = 10;
 const MIN_CLEARANCE_ABOVE_WIREFRAME = 20;
 const MAX_CLEARANCE_ABOVE_WIREFRAME = 50;
 
+// --- helper functions (merged: keep tmp3's num, parts from both) ---
 function num(v, fallback = 0) {
   const n = Number(String(v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
@@ -103,7 +105,6 @@ function parseCsvFile(file, onRows, onError) {
     complete: (result) => {
       const csvText = Papa.unparse(result.data);
       const rows = rowsFromCsvText(csvText);
-
       if (!rows.length) {
         onError('No valid rows found. Expected columns: id, x, y, z, group, tags.');
       } else {
@@ -132,28 +133,17 @@ function distance3d(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 }
 
-function makeCumulative(rows) {
-  let total = 0;
-  return rows.map((r, i) => {
-    if (i > 0) total += distanceHorizontal(rows[i - 1], r);
-    return { ...r, arc: total };
-  });
-}
-
 function metrics(rows) {
   if (!rows.length) {
     return { nodes: 0, carry: 0, ret: 0, lengthKm: 0, zMin: 0, zMax: 0 };
   }
-
   const carry = rows.filter((r) => r.strand === 'Carry').length;
   const ret = rows.filter((r) => r.strand === 'Return').length;
   const zs = rows.map((r) => r.z);
-
   const length = ['Carry', 'Return'].reduce((sum, s) => {
     const line = sortedByStrand(rows, s);
     return sum + line.slice(1).reduce((acc, p, i) => acc + distance3d(line[i], p), 0);
   }, 0);
-
   return {
     nodes: rows.length,
     carry,
@@ -164,7 +154,8 @@ function metrics(rows) {
   };
 }
 
-function loadHeightmapSampler(src, displacementScale) {
+// Heightmap sampler: returns a function that accepts localX, localY, terrainSize, displacementScale (tmp3 version)
+function loadHeightmapSampler(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -179,9 +170,8 @@ function loadHeightmapSampler(src, displacementScale) {
 
       const imageData = ctx.getImageData(0, 0, img.width, img.height).data;
 
-      function sampleHeight(localX, localY, terrainSize) {
+      function sampleHeight(localX, localY, terrainSize, displacementScale) {
         const half = terrainSize / 2;
-
         const u = (localX + half) / terrainSize;
         const v = (localY + half) / terrainSize;
 
@@ -193,20 +183,15 @@ function loadHeightmapSampler(src, displacementScale) {
           img.width - 1,
           Math.max(0, Math.floor(u * (img.width - 1)))
         );
-
         const py = Math.min(
           img.height - 1,
           Math.max(0, Math.floor((1 - v) * (img.height - 1)))
         );
-
         const idx = (py * img.width + px) * 4;
-
         const r = imageData[idx];
         const g = imageData[idx + 1];
         const b = imageData[idx + 2];
-
         const brightness = (r + g + b) / 3 / 255;
-
         return brightness * displacementScale;
       }
 
@@ -218,9 +203,11 @@ function loadHeightmapSampler(src, displacementScale) {
   });
 }
 
-function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
+// --- MiniPlot (from main.jsx but stretched view improved with tmp3's return offset) ---
+function MiniPlot({ title, mode, rows, selectedIds, onSelect, onDragNode, onDragMultipleNodes }) {
   const svgRef = useRef(null);
   const [stretched, setStretched] = useState(false);
+  const dragStartPositions = useRef(new Map());
   const w = 760;
   const h = 255;
   const margin = { top: 32, right: 24, bottom: 40, left: 56 };
@@ -228,7 +215,6 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const carryRows = sortedByStrand(rows, 'Carry');
   const returnRows = sortedByStrand(rows, 'Return').reverse();
 
-  // Calculate cumulative arc length for stretched view
   const getArcData = (strandRows, startOffset = 0) => {
     if (strandRows.length === 0) return [];
     let total = startOffset;
@@ -238,12 +224,12 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     });
   };
 
-  // For stretched view, Return strand should continue from Carry strand's end
+  // Compute arc data with proper continuation
   const carryArc = getArcData(carryRows, 0);
-  const carryTotalLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
-  const returnArc = getArcData(returnRows, carryTotalLength);
+  const totalCarryLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
+  const returnArc = getArcData(returnRows, 0);
+  const totalReturnLength = returnArc.length > 0 ? returnArc[returnArc.length - 1].arc - totalCarryLength : 0;
 
-  // For stretched side view, use cumulative arc length as X
   const getDataForDisplay = () => {
     if (mode === 'side' && stretched) {
       return {
@@ -252,19 +238,13 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
         all: [...carryArc, ...returnArc]
       };
     }
-
-    // For projected side view
     if (mode === 'side') {
-      // Keep original order for Carry (0->5 ascending X)
-      // Keep original order for Return (6->11 descending X)
       return {
         carry: carryRows,
         ret: returnRows,
         all: [...carryRows, ...returnRows]
       };
     }
-
-    // For top view, use original order
     return {
       carry: carryRows,
       ret: returnRows,
@@ -273,67 +253,84 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   };
 
   const displayData = getDataForDisplay();
-  
-  // For line drawing, use the natural order of each strand
-  const getRowsForLine = (strandRows, strandType) => {
-    if (mode === 'side' && !stretched) {
-      // For projected side view, don't sort! Keep the natural flow order
-      // Carry flows left to right (ascending X), Return flows right to left (descending X)
-      return strandRows;
-    }
-    return strandRows;
-  };
-
   const dataByStrand = [
     { strand: 'Carry', rows: displayData.carry },
     { strand: 'Return', rows: displayData.ret }
   ];
-
   const all = displayData.all;
 
   const xValue = mode === 'side' && stretched ? (d) => d.arc : (d) => d.x;
   const yValue = mode === 'side' ? (d) => d.z : (d) => d.y;
 
-    // Use the full range of values
   const xDomain = d3.extent(all, xValue);
   const yDomain = d3.extent(all, yValue);
 
-  const x = d3
-    .scaleLinear()
+  const x = d3.scaleLinear()
     .domain(xDomain[0] === xDomain[1] ? [xDomain[0] - 1, xDomain[1] + 1] : xDomain)
     .nice()
     .range([margin.left, w - margin.right]);
 
-  const y = d3
-    .scaleLinear()
+  const y = d3.scaleLinear()
     .domain(yDomain[0] === yDomain[1] ? [yDomain[0] - 1, yDomain[1] + 1] : yDomain)
     .nice()
     .range([h - margin.bottom, margin.top]);
 
-  const line = d3
-    .line()
+  const line = d3.line()
     .x((d) => x(xValue(d)))
     .y((d) => y(yValue(d)))
-    .defined((d) => true);
+    .defined(() => true);
 
   function startDrag(event, d) {
     event.preventDefault();
     const svg = svgRef.current;
+    const isMultiDrag = selectedIds && selectedIds.size > 1 && selectedIds.has(d.id);
+
+    if (isMultiDrag) {
+      dragStartPositions.current.clear();
+      selectedIds.forEach(id => {
+        const node = rows.find(r => r.id === id);
+        if (node) {
+          dragStartPositions.current.set(id, { x: node.x, y: node.y, z: node.z });
+        }
+      });
+    }
 
     const move = (e) => {
       const pt = d3.pointer(e, svg);
+      if (isMultiDrag && onDragMultipleNodes) {
+        const startPos = dragStartPositions.current.get(d.id);
+        if (!startPos) return;
+        const nodeUpdates = new Map();
 
-      if (mode === 'top') {
-        onDragNode(d.id, {
-          x: x.invert(pt[0]),
-          y: y.invert(pt[1])
-        });
-      }
+        if (mode === 'top') {
+          const deltaX = x.invert(pt[0]) - startPos.x;
+          const deltaY = y.invert(pt[1]) - startPos.y;
+          selectedIds.forEach(id => {
+            const startNodePos = dragStartPositions.current.get(id);
+            if (startNodePos) {
+              nodeUpdates.set(id, { x: startNodePos.x + deltaX, y: startNodePos.y + deltaY });
+            }
+          });
+        }
 
-      if (mode === 'side') {
-        onDragNode(d.id, {
-          z: y.invert(pt[1])
-        });
+        if (mode === 'side') {
+          const deltaZ = y.invert(pt[1]) - startPos.z;
+          selectedIds.forEach(id => {
+            const startNodePos = dragStartPositions.current.get(id);
+            if (startNodePos) {
+              nodeUpdates.set(id, { z: startNodePos.z + deltaZ });
+            }
+          });
+        }
+
+        onDragMultipleNodes(nodeUpdates);
+      } else {
+        if (mode === 'top') {
+          onDragNode(d.id, { x: x.invert(pt[0]), y: y.invert(pt[1]) });
+        }
+        if (mode === 'side') {
+          onDragNode(d.id, { z: y.invert(pt[1]) });
+        }
       }
     };
 
@@ -341,7 +338,6 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
-
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   }
@@ -351,36 +347,16 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     return value.toFixed(0);
   };
 
-  // Calculate total length for display
-  const totalCarryLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
-  const totalReturnLength = returnArc.length > 0 ? returnArc[returnArc.length - 1].arc - carryTotalLength : 0;
-
   return (
     <section className="plot-card">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '12px',
-          minHeight: '32px'
-        }}
-      >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', minHeight: '32px' }}>
         <h3 style={{ margin: 0, fontSize: '0.9rem' }}>{title}</h3>
-
         {mode === 'side' && (
           <button
             onClick={() => setStretched(!stretched)}
             style={{
-              padding: '6px 12px',
-              fontSize: '11px',
-              background: stretched ? '#e52b2f' : '#333',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              whiteSpace: 'nowrap'
+              padding: '6px 12px', fontSize: '11px', background: stretched ? '#e52b2f' : '#333',
+              color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap'
             }}
           >
             {stretched ? '📏 Stretched View' : '🗺️ Projected View'}
@@ -389,178 +365,148 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
       </div>
 
       {mode === 'side' && stretched && (
-        <div
-          style={{
-            fontSize: '15px',
-            color: '#888',
-            marginBottom: '12px',
-            textAlign: 'center',
-            padding: '4px 8px',
-            background: 'rgba(0,0,0,0.2)',
-            borderRadius: '4px'
-          }}>
-          {/* Total stretched length: {totalCarryLength.toFixed(0)}m */}
-          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
-          <span style={{ marginLeft: '12px', fontSize: '10px' }}>
-            (X-axis shows true belt length)
-          </span>
+        <div style={{ fontSize: '15px', color: '#888', marginBottom: '12px', textAlign: 'center', padding: '4px 8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+          Carry length: {totalCarryLength.toFixed(0)}m
+          <span style={{ marginLeft: '12px', fontSize: '10px' }}>(X-axis shows true belt length)</span>
         </div>
       )}
 
-      <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
+      <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`} onClick={(e) => {
+        if (e.target === e.currentTarget || e.target.classList.contains('background')) {
+          onSelect({ id: null }, false);
+        }
+      }}>
+        <rect className="background" width={w} height={h} fill="transparent" />
         <g className="gridlines">
           {x.ticks(8).map((t) => (
-            <line
-              key={`x${t}`}
-              x1={x(t)}
-              x2={x(t)}
-              y1={margin.top}
-              y2={h - margin.bottom}
-            />
+            <line key={`x${t}`} x1={x(t)} x2={x(t)} y1={margin.top} y2={h - margin.bottom} />
           ))}
-
           {y.ticks(5).map((t) => (
-            <line
-              key={`y${t}`}
-              x1={margin.left}
-              x2={w - margin.right}
-              y1={y(t)}
-              y2={y(t)}
-            />
+            <line key={`y${t}`} x1={margin.left} x2={w - margin.right} y1={y(t)} y2={y(t)} />
           ))}
         </g>
 
-        {/* X-axis tick labels */}
         <g className="x-axis-labels" fontSize="10" fill="#999" textAnchor="middle">
           {x.ticks(8).map((t) => (
-            <text key={`xtick${t}`} x={x(t)} y={h - margin.bottom + 15}>
-              {formatNumber(t)}
-            </text>
+            <text key={`xtick${t}`} x={x(t)} y={h - margin.bottom + 15}>{formatNumber(t)}</text>
           ))}
         </g>
 
-        {/* Y-axis tick labels */}
         <g className="y-axis-labels" fontSize="10" fill="#999" textAnchor="end">
           {y.ticks(5).map((t) => (
-            <text key={`ytick${t}`} x={margin.left - 8} y={y(t) + 3}>
-              {formatNumber(t)}
-            </text>
+            <text key={`ytick${t}`} x={margin.left - 8} y={y(t) + 3}>{formatNumber(t)}</text>
           ))}
         </g>
 
         <g className="axis-labels">
           <text x={w / 2} y={h - 8} textAnchor="middle" fontSize="12" fill="#888">
-            {mode === 'side'
-              ? stretched
-                ? 'Belt Arc Length (m) →'
-                : 'Horizontal Distance X (m) →'
-              : 'X (m) →'}
+            {mode === 'side' ? (stretched ? 'Belt Arc Length (m) →' : 'Horizontal Distance X (m) →') : 'X (m) →'}
           </text>
-          
-          {/* Y-axis label */}
-          <text 
-            transform={`translate(12 ${h / 2}) rotate(-90)`}
-            textAnchor="middle" 
-            fontSize="12" 
-            fill="#888"
-          >
+          <text transform={`translate(12 ${h / 2}) rotate(-90)`} textAnchor="middle" fontSize="12" fill="#888">
             {mode === 'side' ? '↑ Elevation Z (m)' : '↑ Y (m)'}
           </text>
         </g>
 
-        {dataByStrand.map(
-          (strandData) =>
-            strandData.rows.length > 1 && (
-              <path
-                key={strandData.strand}
-                className={strandData.strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
-                d={line(strandData.rows)}
-                opacity={stretched ? 1 : 0.8}
-              />
-            )
+        {selectedIds && selectedIds.size > 1 && (
+          <g className="selection-rectangles">
+            {Array.from(selectedIds).map(id => {
+              const node = all.find(d => d.id === id);
+              if (!node) return null;
+              return (
+                <rect
+                  key={`sel-${mode}-${id}`}
+                  x={x(xValue(node)) - 12}
+                  y={y(yValue(node)) - 12}
+                  width={24}
+                  height={24}
+                  fill="none"
+                  stroke="#fff"
+                  strokeWidth={2}
+                  strokeDasharray="4 2"
+                  rx={4}
+                />
+              );
+            })}
+          </g>
+        )}
+
+        {dataByStrand.map((strandData) =>
+          strandData.rows.length > 1 && (
+            <path
+              key={strandData.strand}
+              className={strandData.strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
+              d={line(strandData.rows)}
+              opacity={stretched ? 1 : 0.8}
+            />
+          )
         )}
 
         {all.map((d) => (
           <circle
             key={`${mode}-${d.id}`}
-            className={`plot-dot ${selectedId === d.id ? 'selected' : ''}`}
+            className={`plot-dot ${selectedIds && selectedIds.has(d.id) ? 'selected' : ''}`}
             cx={x(xValue(d))}
             cy={y(yValue(d))}
-            r={selectedId === d.id ? 8 : 6}
+            r={selectedIds && selectedIds.has(d.id) ? 8 : 6}
             fill={strandColor(d.strand)}
             onMouseDown={(e) => startDrag(e, d)}
-            onClick={() => onSelect(d)}
+            onClick={(e) => onSelect(d, e.ctrlKey || e.metaKey)}
           />
         ))}
       </svg>
 
-
       {mode === 'side' && (
         <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', textAlign: 'center' }}>
           💡 Tip: Toggle between Projected actual X vs Z and Stretched true belt length vs Z
+          <br />
+          Ctrl/Cmd+Click to multi-select · Alt+A to select all · Delete to remove selected
         </div>
       )}
     </section>
   );
 }
 
-function addTerrainMesh(terrainScale, heightmapUrl) {
-  const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
-  const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
+// --- Three.js helper components (merged from tmp3 with two-scale support) ---
+function addTerrainMesh(planeScale, zScale, heightmapUrl = HEIGHTMAP_PATH) {
+  const effectiveTerrainSize = TERRAIN_SIZE * planeScale;
+  const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * zScale;
 
-  const geometry = new THREE.PlaneGeometry(
-    effectiveTerrainSize, 
-    effectiveTerrainSize, 
-    256, 
-    256
-  );
-  
+  const geometry = new THREE.PlaneGeometry(effectiveTerrainSize, effectiveTerrainSize, 256, 256);
   const textureLoader = new THREE.TextureLoader();
 
-  // We remove the hardcoded color/roughness here because the textures will handle it
   const material = new THREE.MeshStandardMaterial({
-    displacementScale: TERRAIN_DISPLACEMENT_SCALE,
+    displacementScale: effectiveDisplacementScale,
     wireframe: false,
     flatShading: true,
     side: THREE.DoubleSide
   });
 
-  // 1. Load the COLOR (Diffuse) texture for the rocks
   textureLoader.load("/textures/moon_01_diff_4k.jpg", (diffuseTex) => {
     diffuseTex.wrapS = diffuseTex.wrapT = THREE.RepeatWrapping;
-    diffuseTex.repeat.set(16, 16); // Tile it 16 times across the mine
-    diffuseTex.colorSpace = THREE.SRGBColorSpace; // Color textures must be sRGB
+    diffuseTex.repeat.set(16, 16);
+    diffuseTex.colorSpace = THREE.SRGBColorSpace;
     material.map = diffuseTex;
     material.needsUpdate = true;
   });
 
-  // 2. Load the ROUGHNESS texture
   textureLoader.load("/textures/moon_01_rough_4k.jpg", (roughTex) => {
     roughTex.wrapS = roughTex.wrapT = THREE.RepeatWrapping;
-    roughTex.repeat.set(16, 16); // Must match the repeat scale of the color map!
-    roughTex.colorSpace = THREE.NoColorSpace; // Data textures must not have color space
+    roughTex.repeat.set(16, 16);
+    roughTex.colorSpace = THREE.NoColorSpace;
     material.roughnessMap = roughTex;
     material.needsUpdate = true;
   });
 
-  // 3. Load the HEIGHTMAP (Displacement) for the mountain shape
-  const heightmapTexture = textureLoader.load(heightmapUrl || HEIGHTMAP_PATH, () => {
+  const heightmapTexture = textureLoader.load(heightmapUrl, () => {
     material.needsUpdate = true;
   });
-
-  // Heightmaps use Clamping to prevent weird cliffs at the borders
-  heightmapTexture.wrapS = THREE.ClampToEdgeWrapping;
-  heightmapTexture.wrapT = THREE.ClampToEdgeWrapping;
+  heightmapTexture.wrapS = heightmapTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightmapTexture.repeat.set(1, 1);
-  
-  // Heightmaps are height data, not visual colors, so they must use NoColorSpace
   heightmapTexture.colorSpace = THREE.NoColorSpace;
-
   material.displacementMap = heightmapTexture;
 
   const terrain = new THREE.Mesh(geometry, material);
   terrain.position.set(0, 0, 0);
-
   return terrain;
 }
 
@@ -568,24 +514,16 @@ function makeTextSprite(text, color = '#ffffff') {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 128;
-
   const ctx = canvas.getContext('2d');
   ctx.font = 'bold 58px Arial';
   ctx.fillStyle = color;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 128, 64);
-
   const texture = new THREE.CanvasTexture(canvas);
-
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true
-  });
-
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(70, 35, 1);
-
   return sprite;
 }
 
@@ -593,69 +531,36 @@ function createConveyorRibbonGeometry(points, width = 22) {
   const vertices = [];
   const indices = [];
   const up = new THREE.Vector3(0, 0, 1);
-
   for (let i = 0; i < points.length; i++) {
     const prev = points[Math.max(i - 1, 0)];
     const next = points[Math.min(i + 1, points.length - 1)];
-
     const tangent = new THREE.Vector3().subVectors(next, prev);
     tangent.z = 0;
-
-    if (tangent.length() < 0.001) {
-      tangent.set(1, 0, 0);
-    }
-
+    if (tangent.length() < 0.001) tangent.set(1, 0, 0);
     tangent.normalize();
-
-    const side = new THREE.Vector3()
-      .crossVectors(up, tangent)
-      .normalize()
-      .multiplyScalar(width / 2);
-
+    const side = new THREE.Vector3().crossVectors(up, tangent).normalize().multiplyScalar(width / 2);
     const left = points[i].clone().add(side);
     const right = points[i].clone().sub(side);
-
     vertices.push(left.x, left.y, left.z + 1.5);
     vertices.push(right.x, right.y, right.z + 1.5);
-
     if (i < points.length - 1) {
-      const a = i * 2;
-      const b = i * 2 + 1;
-      const c = i * 2 + 2;
-      const d = i * 2 + 3;
-
+      const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
       indices.push(a, b, c);
       indices.push(b, d, c);
     }
   }
-
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-
   return geometry;
 }
 
 function addTube(scene, points, color, radius = 2.2) {
   if (points.length < 2) return;
-
   const curve = new THREE.CatmullRomCurve3(points);
-
-  const geometry = new THREE.TubeGeometry(
-    curve,
-    Math.max(24, points.length * 8),
-    radius,
-    10,
-    false
-  );
-
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.45,
-    metalness: 0.25
-  });
-
+  const geometry = new THREE.TubeGeometry(curve, Math.max(24, points.length * 8), radius, 10, false);
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.25 });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.userData.dynamicGraph = true;
   scene.add(mesh);
@@ -664,131 +569,87 @@ function addTube(scene, points, color, radius = 2.2) {
 function addRoller(scene, position, tangent, width, selected = false) {
   const horizontal = tangent.clone();
   horizontal.z = 0;
-
-  if (horizontal.length() < 0.001) {
-    horizontal.set(1, 0, 0);
-  }
-
+  if (horizontal.length() < 0.001) horizontal.set(1, 0, 0);
   horizontal.normalize();
-
   const side = new THREE.Vector3(-horizontal.y, horizontal.x, 0).normalize();
-
   const geometry = new THREE.CylinderGeometry(3.5, 3.5, width + 12, 18);
-
   const material = new THREE.MeshStandardMaterial({
     color: selected ? 0xffff66 : 0xb7b7b7,
     roughness: 0.35,
     metalness: 0.5
   });
-
   const roller = new THREE.Mesh(geometry, material);
-
   roller.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), side);
   roller.position.copy(position);
   roller.position.z += 0.2;
   roller.userData.dynamicGraph = true;
-
   scene.add(roller);
 }
 
 function addSupport(scene, position) {
   if (Math.abs(position.z) < 0.2) return;
-
   const height = Math.abs(position.z);
   const centerZ = position.z / 2;
-
   const geometry = new THREE.CylinderGeometry(2.4, 2.4, height, 12);
-
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x5c5c5c,
-    roughness: 0.6,
-    metalness: 0.4
-  });
-
+  const material = new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.6, metalness: 0.4 });
   const support = new THREE.Mesh(geometry, material);
-
-  support.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1)
-  );
-
+  support.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
   support.position.set(position.x, position.y, centerZ);
   support.userData.dynamicGraph = true;
-
   scene.add(support);
 }
 
 function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
   if (lineRows.length < 2) return;
-
   const color = strand === 'Carry' ? CARRY : RETURN;
   const beltWidth = strand === 'Carry' ? 24 : 20;
 
   const points = lineRows.map(toVec);
   const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.2);
-
   const sampled = [];
   const sampleCount = Math.max(40, points.length * 12);
-
   for (let i = 0; i <= sampleCount; i++) {
     sampled.push(curve.getPoint(i / sampleCount));
   }
 
   const beltGeometry = createConveyorRibbonGeometry(sampled, beltWidth);
-
   const beltMaterial = new THREE.MeshStandardMaterial({
     color: strand === 'Carry' ? 0x111827 : 0x2a1010,
     roughness: 0.65,
     metalness: 0.12,
     side: THREE.DoubleSide
   });
-
   const belt = new THREE.Mesh(beltGeometry, beltMaterial);
   belt.userData.dynamicGraph = true;
   scene.add(belt);
 
   const railOffset = beltWidth / 2 + 3;
-  const leftRail = [];
-  const rightRail = [];
-
+  const leftRail = [], rightRail = [];
   for (let i = 0; i < sampled.length; i++) {
     const prev = sampled[Math.max(i - 1, 0)];
     const next = sampled[Math.min(i + 1, sampled.length - 1)];
-
     const tangent = new THREE.Vector3().subVectors(next, prev);
     tangent.z = 0;
-
     if (tangent.length() < 0.001) tangent.set(1, 0, 0);
-
     tangent.normalize();
-
-    const side = new THREE.Vector3(-tangent.y, tangent.x, 0)
-      .normalize()
-      .multiplyScalar(railOffset);
-
+    const side = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize().multiplyScalar(railOffset);
     leftRail.push(sampled[i].clone().add(side).add(new THREE.Vector3(0, 0, 4)));
     rightRail.push(sampled[i].clone().sub(side).add(new THREE.Vector3(0, 0, 4)));
   }
-
   addTube(scene, leftRail, color, 1.7);
   addTube(scene, rightRail, color, 1.7);
 
   const rollerEvery = 0.06;
-
   for (let t = 0; t <= 1; t += rollerEvery) {
     const p = curve.getPointAt(t);
-    const tangent = curve.getTangentAt(t);
-
-    addRoller(scene, p, tangent, beltWidth, false);
+    addRoller(scene, p, curve.getTangentAt(t), beltWidth, false);
     addSupport(scene, p);
   }
 
   lineRows.forEach((row) => {
     const p = toVec(row);
     const selected = row.id === selectedId;
-
     const geometry = new THREE.SphereGeometry(selected ? 8 : 5.5, 24, 24);
-
     const material = new THREE.MeshStandardMaterial({
       color: strandColor(row.strand),
       emissive: strandColor(row.strand),
@@ -796,32 +657,25 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
       roughness: 0.45,
       metalness: 0.15
     });
-
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(p);
     mesh.position.z += 4;
-
     mesh.userData.dynamicGraph = true;
     mesh.userData.row = row;
-
     scene.add(mesh);
+
     if (row.tags && row.tags.trim() !== "") {
       const labelSprite = makeTextSprite(row.tags, "#ffffff");
-      
-      // Position the label slightly above the node
-      labelSprite.position.set(p.x, p.y, p.z + 15); 
-      
-      // Scale it down so it's not overwhelming
-      labelSprite.scale.set(40, 20, 1); 
-      
+      labelSprite.position.set(p.x, p.y, p.z + 15);
+      labelSprite.scale.set(40, 20, 1);
       labelSprite.userData.dynamicGraph = true;
       scene.add(labelSprite);
     }
   });
-  }
+}
 
-
-function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
+// --- View3D (merged: grid constants, terrain hint, two-scale, but multi-select from 3D click is single select) ---
+function View3D({ rows, selectedId, onSelect, planeScale, zScale, heightmapUrl }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
@@ -829,78 +683,22 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   const sceneRef = useRef(null);
   const terrainRef = useRef(null);
   const conveyorGroupRef = useRef(null);
-  
-  // Store camera state for terrain rebuilds
   const savedCameraState = useRef({
     position: new THREE.Vector3(520, -720, 420),
     target: new THREE.Vector3(0, 0, 0)
   });
 
-  // Function to rebuild conveyors
-  function rebuildConveyors(scene) {
-    if (!scene || rows.length === 0) return;
-
-    // Find or create conveyor group
-    let conveyorGroup = scene.getObjectByName('conveyorGroup');
-    if (!conveyorGroup) {
-      conveyorGroup = new THREE.Group();
-      conveyorGroup.name = 'conveyorGroup';
-      scene.add(conveyorGroup);
-      conveyorGroupRef.current = conveyorGroup;
-    }
-
-    // Clear old conveyor objects
-    while (conveyorGroup.children.length > 0) {
-      const obj = conveyorGroup.children[0];
-      conveyorGroup.remove(obj);
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(m => m.dispose());
-        } else {
-          obj.material.dispose();
-        }
-      }
-    }
-
-    const xs = rows.map((r) => r.x);
-    const ys = rows.map((r) => r.y);
-    const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
-
-    function toVec(r) {
-      return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
-    }
-
-    // Override scene.add temporarily to add to conveyor group instead
-    const originalAdd = scene.add.bind(scene);
-    scene.add = (obj) => {
-      conveyorGroup.add(obj);
-    };
-
-    buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
-    buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
-
-    // Restore original add
-    scene.add = originalAdd;
-  }
-
-  // Main scene initialization - rebuilds only when terrain scale or heightmap changes
+  // Main scene init – rebuilds only when terrain scales or heightmap change
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Save camera state if it exists
     if (cameraRef.current && controlsRef.current) {
       savedCameraState.current.position.copy(cameraRef.current.position);
       savedCameraState.current.target.copy(controlsRef.current.target);
     }
 
-    // Clear previous content
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
-
+    while (container.firstChild) container.removeChild(container.firstChild);
     container.innerHTML = '';
 
     const scene = new THREE.Scene();
@@ -909,7 +707,6 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
 
     const width = container.clientWidth;
     const height = container.clientHeight;
-
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 1000000);
     camera.position.copy(savedCameraState.current.position);
     cameraRef.current = camera;
@@ -923,129 +720,82 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.enablePan = true;
-    controls.enableZoom = true;
-    controls.enableRotate = true;
     controls.target.copy(savedCameraState.current.target);
     controls.update();
     controlsRef.current = controls;
 
-    // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-
     const sun = new THREE.DirectionalLight(0xfff5e6, 1.2);
     sun.position.set(300, -500, 800);
     scene.add(sun);
-
     const fill = new THREE.DirectionalLight(0xffd9a0, 0.35);
     fill.position.set(-500, 400, 250);
     scene.add(fill);
 
-    // Add terrain
-    const terrain = addTerrainMesh(terrainScale, heightmapUrl);
+    const terrain = addTerrainMesh(planeScale, zScale, heightmapUrl);
     terrainRef.current = terrain;
     scene.add(terrain);
 
     const gridDivisions = GRID_SIZE_METERS / GRID_SPACING_METERS;
-    // const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
-    const grid = new THREE.GridHelper(
-      GRID_SIZE_METERS,
-      gridDivisions,
-      0x4b4030,
-      0x2d271f
-    );
+    const grid = new THREE.GridHelper(GRID_SIZE_METERS, gridDivisions, 0x4b4030, 0x2d271f);
     grid.rotation.x = Math.PI / 2;
     grid.position.z = 0.04;
     scene.add(grid);
 
-    // Add axes
     function axis(start, end, color) {
       const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
       const material = new THREE.LineBasicMaterial({ color });
-      const line = new THREE.Line(geometry, material);
-      scene.add(line);
+      scene.add(new THREE.Line(geometry, material));
     }
-
     axis(new THREE.Vector3(-1100, 0, 0), new THREE.Vector3(1100, 0, 0), 0xff5555);
     axis(new THREE.Vector3(0, -1100, 0), new THREE.Vector3(0, 1100, 0), 0x55ff55);
     axis(new THREE.Vector3(0, 0, -250), new THREE.Vector3(0, 0, 500), 0x66aaff);
 
-    // Add labels
-    const xLabel = makeTextSprite('X', '#ff6666');
-    xLabel.position.set(1160, 0, 25);
-    scene.add(xLabel);
+    ['X', 'Y', 'Z'].forEach((label, i) => {
+      const color = ['#ff6666', '#66ff66', '#66aaff'][i];
+      const pos = [new THREE.Vector3(1160, 0, 25), new THREE.Vector3(0, 1160, 25), new THREE.Vector3(0, 0, 540)][i];
+      const sprite = makeTextSprite(label, color);
+      sprite.position.copy(pos);
+      scene.add(sprite);
+    });
 
-    const yLabel = makeTextSprite('Y', '#66ff66');
-    yLabel.position.set(0, 1160, 25);
-    scene.add(yLabel);
-
-    const zLabel = makeTextSprite('Z', '#66aaff');
-    zLabel.position.set(0, 0, 540);
-    scene.add(zLabel);
-
-    // Create conveyor group
     const conveyorGroup = new THREE.Group();
     conveyorGroup.name = 'conveyorGroup';
     scene.add(conveyorGroup);
     conveyorGroupRef.current = conveyorGroup;
 
-    // Build conveyors immediately after scene setup
     if (rows.length > 0) {
-      const xs = rows.map((r) => r.x);
-      const ys = rows.map((r) => r.y);
+      const xs = rows.map(r => r.x), ys = rows.map(r => r.y);
       const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
       const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
-
-      function toVec(r) {
-        return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
-      }
-
+      function toVec(r) { return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z); }
       const originalAdd = scene.add.bind(scene);
-      scene.add = (obj) => {
-        conveyorGroup.add(obj);
-      };
-
+      scene.add = (obj) => conveyorGroup.add(obj);
       buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
       buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
-
       scene.add = originalAdd;
     }
 
-    // Click handling
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-
     function onClick(event) {
-      const clickable = scene.children.filter((obj) => obj.userData?.row);
-      // const clickable = [];
-      scene.traverse((obj) => {
-        if (obj.userData?.row) {
-          clickable.push(obj);
-        }
-      });
-
+      const clickable = [];
+      scene.traverse(obj => { if (obj.userData?.row) clickable.push(obj); });
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(clickable, false);
-
-      if (hits.length > 0) {
-        onSelect(hits[0].object.userData.row);
-      }
+      if (hits.length > 0) onSelect(hits[0].object.userData.row);
     }
-
     renderer.domElement.addEventListener('click', onClick);
 
     function onResize() {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
+      const w = container.clientWidth, h = container.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     }
-
     window.addEventListener('resize', onResize);
 
     let frameId;
@@ -1064,15 +814,13 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       renderer.dispose();
       container.innerHTML = '';
     };
-  // }, [terrainScale, heightmapUrl]); // Only rebuild when these change
-  }, [onSelect, terrainScale, heightmapUrl]);
+  }, [planeScale, zScale, heightmapUrl]);
 
-  // Update conveyors when rows or selectedId change
+  // Conveyor update effect
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene || rows.length === 0) return;
+    if (!scene) return;
 
-    // Find conveyor group
     let conveyorGroup = scene.getObjectByName('conveyorGroup');
     if (!conveyorGroup) {
       conveyorGroup = new THREE.Group();
@@ -1081,75 +829,50 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       conveyorGroupRef.current = conveyorGroup;
     }
 
-    // Clear old conveyor objects
     while (conveyorGroup.children.length > 0) {
       const obj = conveyorGroup.children[0];
       conveyorGroup.remove(obj);
       if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(m => m.dispose());
-        } else {
-          obj.material.dispose();
-        }
+        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+        else obj.material.dispose();
       }
     }
 
-    const xs = rows.map((r) => r.x);
-    const ys = rows.map((r) => r.y);
+    if (rows.length === 0) return;
+
+    const xs = rows.map(r => r.x), ys = rows.map(r => r.y);
     const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
     const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
-
-    function toVec(r) {
-      return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z);
-    }
-
-    // Override scene.add to add to conveyor group
+    function toVec(r) { return new THREE.Vector3(r.x - xMid, r.y - yMid, r.z); }
     const originalAdd = scene.add.bind(scene);
-    scene.add = (obj) => {
-      conveyorGroup.add(obj);
-    };
-
+    scene.add = (obj) => conveyorGroup.add(obj);
     buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
     buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
-
     scene.add = originalAdd;
   }, [rows, selectedId]);
 
-  // Update terrain texture when heightmapUrl changes
+  // Terrain texture update
   useEffect(() => {
     if (!terrainRef.current || !heightmapUrl) return;
-
     const textureLoader = new THREE.TextureLoader();
     textureLoader.load(heightmapUrl, (newTexture) => {
       newTexture.wrapS = newTexture.wrapT = THREE.RepeatWrapping;
       newTexture.repeat.set(1, 1);
-
-      const material = terrainRef.current.material;
-      material.displacementMap = newTexture;
-      material.needsUpdate = true;
+      terrainRef.current.material.displacementMap = newTexture;
+      terrainRef.current.material.needsUpdate = true;
     });
   }, [heightmapUrl]);
 
-  // const controls = controlsRef.current;
-
-  // if (controls) {
-  //   controls.target.set(0, 0, 0);
-  //   controls.update();
-  // }
-  // }, [rows, selectedId, terrainScale, heightmapUrl]);
-  const terrainFootprint = TERRAIN_SIZE * terrainScale;
-  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
+  const terrainFootprint = TERRAIN_SIZE * planeScale;
+  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
 
   return (
     <section className="view3d">
       <div className="view-head">
         <h3>3D CONVEYOR VIEW</h3>
         <span className="hint">
-          Drag rotate · Scroll zoom · Right-click pan · Click node · Wireframe scale {terrainScale.toFixed(2)}x
-          {/* 1 unit = 1 m · Grid {GRID_SPACING_METERS} m · Terrain {terrainFootprint.toFixed(0)} m ×{' '}
-          {terrainFootprint.toFixed(0)} m · Height range {terrainHeightRange.toFixed(0)} m */}
-
+          1 unit = 1 m · Grid {GRID_SPACING_METERS} m · Terrain {terrainFootprint.toFixed(0)} m × {terrainFootprint.toFixed(0)} m · Height range {terrainHeightRange.toFixed(0)} m
         </span>
       </div>
       <div ref={containerRef} className="three-container" />
@@ -1157,66 +880,8 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   );
 }
 
-// FROM GROUP
-// function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
-//   return (
-//     <div className="table-wrap">
-//       <table>
-//         <thead>
-//           <tr>
-//             <th>ID</th>
-//             <th>STRAND</th>
-//             <th>X (m)</th>
-//             <th>Y (m)</th>
-//             <th>Z (m)</th>
-//             <th>TAGS</th>
-//           </tr>
-//         </thead>
-
-//         <tbody>
-//           {rows.map((r) => (
-//             <tr
-//               key={r.id}
-//               className={[
-//                 selectedId === r.id ? 'selected-row' : '',
-//                 fittedIds?.has(r.id) ? 'fitted-row' : ''
-//               ].join(' ')}
-//               onClick={() => onSelect(r)}
-//               title={
-//                 fittedIds?.has(r.id) && r.wireframeZ !== null
-//                   ? `Adjusted to wireframe Z = ${Number(r.wireframeZ).toFixed(2)} m`
-//                   : ''
-//               }
-//             >
-//               <td>{r.id}</td>
-
-//               <td>
-//                 <span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>
-//                   {r.strand}
-//                 </span>
-//               </td>
-
-//               {['x', 'y', 'z'].map((k) => (
-//                 <td key={k}>
-//                   <input
-//                     value={Number(r[k]).toFixed(2)}
-//                     onChange={(e) => onEdit(r.id, { [k]: num(e.target.value, r[k]) })}
-//                   />
-//                 </td>
-//               ))}
-
-//               <td>
-//                 <input value={r.tags} onChange={(e) => onEdit(r.id, { tags: e.target.value })} />
-//               </td>
-//             </tr>
-//           ))}
-//         </tbody>
-//       </table>
-//     </div>
-//   );
-// }
-
-function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
+// --- NodeTable with OFFSET column (merged) ---
+function NodeTable({ rows, selectedIds, fittedIds, onSelect, onEdit }) {
   return (
     <div className="table-wrap">
       <table>
@@ -1231,22 +896,20 @@ function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
             <th>TAGS</th>
           </tr>
         </thead>
-
         <tbody>
           {rows.map((r) => {
-            const offset =
-              Number.isFinite(r.wireframeZ) && r.wireframeZ !== null
-                ? r.z - r.wireframeZ
-                : null;
+            const offset = Number.isFinite(r.wireframeZ) && r.wireframeZ !== null
+              ? (r.z - r.wireframeZ).toFixed(2) + ' m'
+              : '—';
 
             return (
               <tr
                 key={r.id}
                 className={[
-                  selectedId === r.id ? 'selected-row' : '',
+                  selectedIds?.has(r.id) ? 'selected-row' : '',
                   fittedIds?.has(r.id) ? 'fitted-row' : ''
                 ].join(' ')}
-                onClick={() => onSelect(r)}
+                onClick={(e) => onSelect(r, e.ctrlKey || e.metaKey)}
                 title={
                   fittedIds?.has(r.id) && r.wireframeZ !== null
                     ? `Adjusted. Wireframe Z = ${Number(r.wireframeZ).toFixed(2)} m`
@@ -1254,13 +917,7 @@ function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
                 }
               >
                 <td>{r.id}</td>
-
-                <td>
-                  <span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>
-                    {r.strand}
-                  </span>
-                </td>
-
+                <td><span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>{r.strand}</span></td>
                 {['x', 'y', 'z'].map((k) => (
                   <td key={k}>
                     <input
@@ -1269,9 +926,7 @@ function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
                     />
                   </td>
                 ))}
-
-                <td>{offset === null ? '—' : `${offset.toFixed(2)} m`}</td>
-
+                <td>{offset}</td>
                 <td>
                   <input value={r.tags} onChange={(e) => onEdit(r.id, { tags: e.target.value })} />
                 </td>
@@ -1284,25 +939,29 @@ function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
   );
 }
 
+// --- Main App component (merged: multi-selection, original backup reset, clearance-based FIT, two scales) ---
 function App() {
   const [rows, setRows] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const originalRowsRef = useRef(null);            // for RESET ALL
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState(null);
   const [status, setStatus] = useState('Loading path_simple.csv...');
   const [heightmapUrl, setHeightmapUrl] = useState(HEIGHTMAP_PATH);
   const [fittedIds, setFittedIds] = useState(new Set());
   const [heightSampler, setHeightSampler] = useState(null);
-  const [terrainScale, setTerrainScale] = useState(1);
+  const [planeScale, setPlaneScale] = useState(1);
+  const [zScale, setZScale] = useState(1);
 
+  // Load default CSV
   useEffect(() => {
     fetch(DEFAULT_CSV_PATH)
       .then((res) => {
-        if (!res.ok) {
-          throw new Error('Could not load /path_simple.csv. Put path_simple.csv inside app/public/.');
-        }
+        if (!res.ok) throw new Error('Could not load /path_simple.csv.');
         return res.text();
       })
       .then((csvText) => {
         const loadedRows = rowsFromCsvText(csvText);
+        originalRowsRef.current = JSON.parse(JSON.stringify(loadedRows));
         setRows(loadedRows);
         setFittedIds(new Set());
         setStatus(`Loaded ${loadedRows.length} nodes from path_simple.csv`);
@@ -1310,198 +969,161 @@ function App() {
       .catch((err) => setStatus(err.message));
   }, []);
 
+  // Load heightmap sampler (tmp3 version)
   useEffect(() => {
-    loadHeightmapSampler(heightmapUrl, TERRAIN_DISPLACEMENT_SCALE)
-      .then((sampler) => {
-        setHeightSampler(() => sampler);
-      })
-      .catch(() => {
-        setStatus('Could not load heightmap for FIT operation.');
-      });
+    loadHeightmapSampler(heightmapUrl)
+      .then((sampler) => setHeightSampler(() => sampler))
+      .catch(() => setStatus('Could not load heightmap for FIT operation.'));
   }, [heightmapUrl]);
 
-  const m = useMemo(() => metrics(rows), [rows]);
-  const selected = rows.find((r) => r.id === selectedId);
-  
-  const terrainFootprint = TERRAIN_SIZE * terrainScale;
-  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
-
-  function setSelected(row) {
-    setSelectedId(row.id);
-    setStatus(`Selected node ${row.id}`);
-  }
-
-  function updateNode(id, patch) {
-    const nextPatch = { ...patch };
-
-    if (Object.prototype.hasOwnProperty.call(patch, 'z')) {
-      nextPatch.originalZ = patch.z;
+  // Keyboard shortcuts (main.jsx)
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.altKey && e.key === 'a') {
+        e.preventDefault();
+        if (rows.length > 0) {
+          const allIds = new Set(rows.map(r => r.id));
+          setSelectedIds(allIds);
+          setLastSelectedId(rows[rows.length - 1].id);
+          setStatus(`Selected all ${rows.length} nodes`);
+        }
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') &&
+          e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        deleteNode();
+      }
     }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [rows, selectedIds]);
 
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              ...patch
-            }
-          : r
-      )
-    );
+  const m = useMemo(() => metrics(rows), [rows]);
+  const selected = rows.find((r) => r.id === lastSelectedId);
 
-    setFittedIds((prev) => {
+  // Multi-select handler (from main.jsx)
+  function setSelected(row, ctrlKey = false) {
+    if (!row || row.id === null) {
+      setSelectedIds(new Set());
+      setLastSelectedId(null);
+      setStatus('Selection cleared');
+      return;
+    }
+    setSelectedIds(prev => {
       const next = new Set(prev);
-      next.delete(id);
+      if (ctrlKey) {
+        next.has(row.id) ? next.delete(row.id) : next.add(row.id);
+      } else {
+        next.clear();
+        next.add(row.id);
+      }
+      setLastSelectedId(row.id);
+      setStatus(`Selected ${next.size} node(s). Last: ${row.id}`);
       return next;
     });
   }
 
-  function decreaseWireframeScale() {
-    setTerrainScale((prev) => {
-      const next = Math.max(0.2, Number((prev - 0.1).toFixed(2)));
-      setFittedIds(new Set());
-      setStatus(`Wireframe scale decreased to ${next.toFixed(2)}x. Press FIT again to resnap nodes.`);
-      return next;
-    });
+  // 3D view single select
+  function onSelect3D(row) {
+    setSelectedIds(new Set([row.id]));
+    setLastSelectedId(row.id);
+    setStatus(`Selected node ${row.id} (3D view)`);
   }
 
-  function increaseWireframeScale() {
-    setTerrainScale((prev) => {
-      const next = Math.min(5, Number((prev + 0.1).toFixed(2)));
-      setFittedIds(new Set());
-      setStatus(`Wireframe scale increased to ${next.toFixed(2)}x. Press FIT again to resnap nodes.`);
-      return next;
-    });
+  // Update multiple nodes (drag)
+  function updateMultipleNodes(nodeUpdates) {
+    setRows(prev => prev.map(r => nodeUpdates.has(r.id) ? { ...r, ...nodeUpdates.get(r.id) } : r));
   }
 
-  function resetWireframeScale() {
-    setTerrainScale(1);
+  // Update single node
+  function updateNode(id, patch) {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+    setFittedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+  }
+
+  // Scale handlers (from tmp3)
+  function updatePlaneScale(value) {
+    const next = clamp(num(value, planeScale), 0.05, 20);
+    setPlaneScale(next);
     setFittedIds(new Set());
-    setStatus('Wireframe scale reset to 1.00x. Press FIT again to resnap nodes.');
+    setStatus(`Plane scale set to ${next.toFixed(2)}x. Press FIT again to resnap nodes.`);
   }
 
+  function updateZScale(value) {
+    const next = clamp(num(value, zScale), 0, 20);
+    setZScale(next);
+    setFittedIds(new Set());
+    setStatus(`Z scale set to ${next.toFixed(2)}x. Press FIT again to resnap nodes.`);
+  }
+
+  // Reset all: scales + original CSV rows (merged from main.jsx and tmp3)
+  function resetAll() {
+    setPlaneScale(1);
+    setZScale(1);
+    setFittedIds(new Set());
+    setSelectedIds(new Set());
+    setLastSelectedId(null);
+    if (originalRowsRef.current) {
+      setRows(JSON.parse(JSON.stringify(originalRowsRef.current)));
+      setStatus('Reset: wireframe scales to 1.00x and nodes to original CSV values.');
+    } else {
+      setStatus('Wireframe scales reset. No original data to restore.');
+    }
+  }
+
+  // FIT nodes with clearance rule (tmp3)
   function fitNodesToWireframe() {
     if (!heightSampler || !rows.length) {
       setStatus('Heightmap is not ready yet.');
       return;
     }
-
-    const xs = rows.map((r) => r.x);
-    const ys = rows.map((r) => r.y);
-
+    const xs = rows.map(r => r.x);
+    const ys = rows.map(r => r.y);
     const xMid = (Math.min(...xs) + Math.max(...xs)) / 2;
     const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
-
-    const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
-    const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
+    const effectiveTerrainSize = TERRAIN_SIZE * planeScale;
+    const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * zScale;
     const adjusted = new Set();
 
-    const fittedRows = rows.map((row) => {
-      if (!row.fromCsv) {
-        return row;
-      }
-
+    const fittedRows = rows.map(row => {
+      if (!row.fromCsv) return row;
       const localX = row.x - xMid;
       const localY = row.y - yMid;
-
-      const wireframeZ = heightSampler(localX, localY, effectiveTerrainSize,
-        effectiveDisplacementScale
-      );
-
+      const wireframeZ = heightSampler(localX, localY, effectiveTerrainSize, effectiveDisplacementScale);
       const baseZ = Number.isFinite(row.originalZ) ? row.originalZ : row.z;
 
       if (wireframeZ === null) {
-        return {
-          ...row,
-          z: baseZ,
-          fittedToWireframe: false,
-          wireframeZ: null
-        };
+        return { ...row, z: baseZ, fittedToWireframe: false, wireframeZ: null };
       }
 
       let fittedZ = baseZ;
-
-      // JOY
-      // if (baseZ < wireframeZ) {
-      //   fittedZ = wireframeZ + MIN_CLEARANCE_ABOVE_WIREFRAME;
-      // } else {
-      //   fittedZ = Math.min(baseZ, wireframeZ + MAX_CLEARANCE_ABOVE_WIREFRAME);
-      // }
-
-      // const changed = Math.abs(fittedZ - baseZ) > 1e-6;
-
-      // if (changed) {
-      //   adjusted.add(row.id);
-      // }
-
-      if (row.z < wireframeZ) {
-        adjusted.add(row.id);
-
-        return {
-          ...row,
-          z: wireframeZ,
-          fittedToWireframe: true,
-          wireframeZ
-        };
+      if (baseZ < wireframeZ) {
+        fittedZ = wireframeZ + MIN_CLEARANCE_ABOVE_WIREFRAME;
+      } else {
+        fittedZ = Math.min(baseZ, wireframeZ + MAX_CLEARANCE_ABOVE_WIREFRAME);
       }
 
-      return {
-        ...row,
-        z: fittedZ,
-        fittedToWireframe: false,
-        // fittedToWireframe: changed, // JOY
-        wireframeZ
-      };
+      const changed = Math.abs(fittedZ - baseZ) > 1e-6;
+      if (changed) adjusted.add(row.id);
+      return { ...row, z: fittedZ, fittedToWireframe: changed, wireframeZ };
     });
 
     setRows(fittedRows);
     setFittedIds(adjusted);
-
     setStatus(
       adjusted.size > 0
-        ? `FIT complete: adjusted ${adjusted.size} node${adjusted.size === 1 ? '' : 's'} to wireframe height at ${terrainScale.toFixed(2)}x scale.`
-        : `FIT complete: no nodes needed adjustment at ${terrainScale.toFixed(2)}x scale.`
+        ? `FIT complete: adjusted ${adjusted.size} node(s). Rule: min clearance ${MIN_CLEARANCE_ABOVE_WIREFRAME} m, max ${MAX_CLEARANCE_ABOVE_WIREFRAME} m.`
+        : `FIT complete: no nodes needed adjustment.`
     );
   }
-  // OLD ADDNODE
-  // function addNode() {
-  //   const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
-  //   const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
 
-  //   const node = {
-  //     id,
-  //     strand: 'Carry',
-  //     strandValue: -1,
-  //     group: 0,
-  //     x: last.x + 50,
-  //     y: last.y,
-  //     z: last.z,
-  //     originalZ: last.z,
-  //     tags: '',
-  //     fromCsv: false,
-  //     fittedToWireframe: false,
-  //     wireframeZ: null
-  //   };
-
-  //   setRows((r) => [...r, node]);
-  //   setSelectedId(id);
-  //   setStatus(`Added node ${id}`);
-  // }
-
+  // Add node (main.jsx with template)
   function addNode() {
-    setRows((currentRows) => {
-      // 1. Calculate the new ID based on the MOST RECENT state
+    setRows(currentRows => {
       const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
       const newId = maxId + 1;
-  
-      // 2. Find the template (selected node) from the MOST RECENT state
-      // We use the 'selectedId' from the outer scope
-      const selectedNode = currentRows.find(r => r.id === selectedId);
-      
-      // 3. Find the last node for positioning
+      const selectedNode = currentRows.find(r => r.id === lastSelectedId);
       const last = currentRows[currentRows.length - 1] ?? { x: 0, y: 0, z: 0 };
-  
-      // 4. Build the new node
       const newNode = {
         id: newId,
         strand: selectedNode ? selectedNode.strand : 'Carry',
@@ -1510,114 +1132,87 @@ function App() {
         x: last.x + 50,
         y: last.y,
         z: last.z,
-        tags: ''
+        originalZ: last.z,
+        tags: '',
+        fromCsv: false,
+        fittedToWireframe: false,
+        wireframeZ: null
       };
+      setStatus(`Added node ${newId}`);
       return [...currentRows, newNode];
     });
   }
 
+  // Insert after (tmp3/main.jsx)
   function addNodeAfter() {
-    if (selectedId === null) {
+    if (lastSelectedId === null) {
       setStatus("Select a node first to insert after it!");
       return;
     }
-
-    setRows((currentRows) => {
-      // 1. Find where the selected node is in the array
-      const currentIndex = currentRows.findIndex(r => r.id === selectedId);
+    setRows(currentRows => {
+      const currentIndex = currentRows.findIndex(r => r.id === lastSelectedId);
       if (currentIndex === -1) return currentRows;
-
       const selectedNode = currentRows[currentIndex];
       const nextNode = currentRows[currentIndex + 1];
-
-      // 2. Generate the "Sub-ID" (e.g., 5 becomes 5a)
-      // If adding after 5a, it becomes 5aa
       const newId = Math.max(...currentRows.map(r => Number(r.id) || 0)) + 1;
-
-      // 3. Calculate position (midpoint between current and next, or just offset)
       const newNode = {
-        ...selectedNode, // Inherit strand, group, strandValue
+        ...selectedNode,
         id: newId,
-        // Place it physically between the current and next node if next exists
         x: nextNode ? (selectedNode.x + nextNode.x) / 2 : selectedNode.x + 25,
         y: nextNode ? (selectedNode.y + nextNode.y) / 2 : selectedNode.y + 25,
         z: nextNode ? (selectedNode.z + nextNode.z) / 2 : selectedNode.z,
         fromCsv: false,
-        tags: `Inserted after ${selectedId}`
+        tags: `Inserted after ${lastSelectedId}`,
+        fittedToWireframe: false,
+        wireframeZ: null
       };
-
-      // 4. Splice into the array to maintain visual path order
       const updatedRows = [...currentRows];
       updatedRows.splice(currentIndex + 1, 0, newNode);
-
-      // 5. Update Selection/Status
       setTimeout(() => {
-        setSelectedId(newId);
-        setStatus(`Inserted Node ${newId} between ${selectedId} and ${nextNode?.id || 'End'}`);
+        setSelectedIds(new Set([newId]));
+        setLastSelectedId(newId);
+        setStatus(`Inserted Node ${newId} between ${lastSelectedId} and ${nextNode?.id || 'End'}`);
       }, 0);
-
       return updatedRows;
     });
   }
 
-  // 5. Update Status and Selection (Side effects)
-  // We use setTimeout to move these out of the render-cycle calculation
-  setTimeout(() => {
-    setSelectedId(newId);
-    setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
-  }, 0);
-
-
+  // Delete nodes (multi, from main.jsx)
   function deleteNode() {
-    if (selectedId === null) return;
-
-    setRows((r) => r.filter((n) => n.id !== selectedId));
-
-    setFittedIds((prev) => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    setRows(r => r.filter(n => !selectedIds.has(n.id)));
+    setFittedIds(prev => {
       const next = new Set(prev);
-      next.delete(selectedId);
+      selectedIds.forEach(id => next.delete(id));
       return next;
     });
-
-    setSelectedId(null);
-    setStatus('Deleted selected node');
+    setSelectedIds(new Set());
+    setLastSelectedId(null);
+    setStatus(`Deleted ${count} node(s)`);
   }
 
   function toggleStrand() {
-    if (selectedId === null) return;
-    
-    setRows((prev) => prev.map((r) => {
-      if (r.id === selectedId) {
+    if (selectedIds.size === 0) return;
+    setRows(prev => prev.map(r => {
+      if (selectedIds.has(r.id)) {
         const isCurrentlyCarry = r.strand === 'Carry';
         return {
           ...r,
           strand: isCurrentlyCarry ? 'Return' : 'Carry',
-          strandValue: isCurrentlyCarry ? 1 : -1, // Carry is -1, Return is 1
-          group: isCurrentlyCarry ? 1 : 0         // Assuming group 1 = Return, 0 = Carry
+          strandValue: isCurrentlyCarry ? 1 : -1,
+          group: isCurrentlyCarry ? 1 : 0
         };
       }
       return r;
     }));
-
-    setStatus(`Switched Node ${selectedId} to ${selected?.strand === 'Carry' ? 'Return' : 'Carry'}`);
-}
+    setStatus(`Switched strand for ${selectedIds.size} node(s)`);
+  }
 
   function exportFile(type) {
-    const exportRows = rows.map((r) => ({
-      id: r.id,
-      x: r.x,
-      y: r.y,
-      z: r.z,
-      group: r.group,
-      tags: r.tags
-    }));
-
+    const exportRows = rows.map(r => ({ id: r.id, x: r.x, y: r.y, z: r.z, group: r.group, tags: r.tags }));
     const data = type === 'json' ? JSON.stringify(exportRows, null, 2) : Papa.unparse(exportRows);
-
-    const blob = new Blob([data], {
-      type: type === 'json' ? 'application/json' : 'text/csv'
-    });
-
+    const blob = new Blob([data], { type: type === 'json' ? 'application/json' : 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `conveyor-layout.${type === 'json' ? 'json' : 'csv'}`;
@@ -1625,30 +1220,25 @@ function App() {
     URL.revokeObjectURL(a.href);
   }
 
+  const terrainFootprint = TERRAIN_SIZE * planeScale;
+  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
+
   return (
     <main className="editor">
       <header className="topbar">
         <div className="brand">MineSight</div>
         <h1>Conveyor Layout Editor</h1>
-
         <div className="summary">
           Nodes <b>{m.nodes}</b>
           <span>·</span>
-          <span className="carry-text">
-            Carry <b>{m.carry}</b>
-          </span>
-          <span className="return-text">
-            Return <b>{m.ret}</b>
-          </span>
+          <span className="carry-text">Carry <b>{m.carry}</b></span>
+          <span className="return-text">Return <b>{m.ret}</b></span>
           <span>·</span>
           Belt Length <b>{m.lengthKm.toFixed(2)} km</b>
           <span>·</span>
-          Elevation{' '}
-          <b>
-            {m.zMin.toFixed(1)} → {m.zMax.toFixed(1)} m
-          </b>
+          Elevation <b>{m.zMin.toFixed(1)} → {m.zMax.toFixed(1)} m</b>
           <span>·</span>
-          Wireframe <b>{terrainScale.toFixed(2)}x</b>
+          Plane <b>{planeScale.toFixed(2)}x</b> · Z <b>{zScale.toFixed(2)}x</b>
           Terrain <b>{terrainFootprint.toFixed(0)} m</b>
           <span>·</span>
           Height <b>{terrainHeightRange.toFixed(0)} m</b>
@@ -1657,76 +1247,53 @@ function App() {
 
       <div className="toolbar">
         <label className="tool-btn">
-          <input
-            type="file"
-            accept="image/png, image/jpeg"
-            onChange={(e) => {
-              if (e.target.files?.[0]) {
-                const url = URL.createObjectURL(e.target.files[0]);
-                setHeightmapUrl(url);
-                setStatus('Loaded custom heightmap');
-              }
-            }}
-            style={{ display: 'none' }}
-          />
+          <input type="file" accept="image/png, image/jpeg" onChange={(e) => {
+            if (e.target.files?.[0]) {
+              const url = URL.createObjectURL(e.target.files[0]);
+              setHeightmapUrl(url);
+              setStatus('Loaded custom heightmap');
+            }
+          }} style={{ display: 'none' }} />
           Upload Heightmap
         </label>
         <label className="tool-btn">
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) =>
-              e.target.files?.[0] &&
-              parseCsvFile(
-                e.target.files[0],
-                (newRows) => {
-                  setRows(newRows);
-                  setFittedIds(new Set());
-                  setStatus(`Loaded ${newRows.length} nodes from uploaded CSV`);
-                },
-                setStatus
-              )
-            }
-          />
+          <input type="file" accept=".csv,text/csv" onChange={(e) =>
+            e.target.files?.[0] &&
+            parseCsvFile(e.target.files[0], (newRows) => {
+              originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
+              setRows(newRows);
+              setFittedIds(new Set());
+              setStatus(`Loaded ${newRows.length} nodes from uploaded CSV`);
+            }, setStatus)
+          } />
           Upload CSV
         </label>
-        <button 
-          className="primary" 
-          onClick={addNodeAfter} 
-          disabled={selectedId === null}
-          style={{ backgroundColor: '#2e7d32' }} // Darker green to differentiate
-        >
-          + Insert After ({selectedId ?? '?'})
+        <button className="primary" onClick={addNodeAfter} disabled={lastSelectedId === null}
+          style={{ backgroundColor: '#2e7d32' }}>
+          + Insert After ({lastSelectedId ?? '?'})
         </button>
-        {/* <button className="primary" onClick={addNode}>+ Add Node</button> */}
-        {/* NEW TOGGLE BUTTON */}
-        <button 
-            onClick={toggleStrand} 
-            disabled={selectedId === null}
-            style={{ borderLeft: '4px solid #0857f7' }}
-          >
-            ⇄ Switch Strand
+        <button onClick={toggleStrand} disabled={selectedIds.size === 0}
+          style={{ borderLeft: '4px solid #0857f7' }}>
+          ⇄ Switch Strand ({selectedIds.size})
         </button>
+        <button className="fit-btn" onClick={fitNodesToWireframe}>FIT</button>
 
-        <button className="fit-btn" onClick={fitNodesToWireframe}>
-          FIT
-        </button>
+        <label className="wire-input">
+          Plane Scale
+          <input type="number" min="0.05" max="20" step="0.05" value={planeScale}
+            onChange={(e) => updatePlaneScale(e.target.value)} />
+        </label>
+        <label className="wire-input">
+          Z Scale
+          <input type="number" min="0" max="20" step="0.05" value={zScale}
+            onChange={(e) => updateZScale(e.target.value)} />
+        </label>
 
-        <button onClick={decreaseWireframeScale}>WIRE -</button>
-        <button onClick={resetWireframeScale}>RESET</button>
-        <button onClick={increaseWireframeScale}>WIRE +</button>
-
-        <button className="primary" onClick={addNode}>
-          + Add Node
-        </button>
-
-        <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
-          Delete Node
-        </button>
-
+        <button onClick={resetAll}>RESET ALL</button>
+        <button className="primary" onClick={addNode}>+ Add Node</button>
+        <button className="danger" disabled={selectedIds.size === 0} onClick={deleteNode}>Delete Node</button>
         <button onClick={() => exportFile('csv')}>Export CSV</button>
         <button onClick={() => exportFile('json')}>Export JSON</button>
-
         <span className="status">{status}</span>
       </div>
 
@@ -1734,51 +1301,29 @@ function App() {
         <>
           <section className="visual-area">
             <div className="left-plots">
-              <MiniPlot
-                title="SIDE VIEW"
-                mode="side"
-                rows={rows}
-                selectedId={selectedId}
-                onSelect={setSelected}
-                onDragNode={updateNode}
-              />
-
-              <MiniPlot
-                title="TOP VIEW"
-                mode="top"
-                rows={rows}
-                selectedId={selectedId}
-                onSelect={setSelected}
-                onDragNode={updateNode}
-              />
+              <MiniPlot title="SIDE VIEW" mode="side" rows={rows}
+                selectedIds={selectedIds} onSelect={setSelected}
+                onDragNode={updateNode} onDragMultipleNodes={updateMultipleNodes} />
+              <MiniPlot title="TOP VIEW" mode="top" rows={rows}
+                selectedIds={selectedIds} onSelect={setSelected}
+                onDragNode={updateNode} onDragMultipleNodes={updateMultipleNodes} />
             </div>
-
-            <View3D
-              rows={rows}
-              selectedId={selectedId}
-              onSelect={setSelected}
-              terrainScale={terrainScale}
-              heightmapUrl={heightmapUrl}
-            />
+            <View3D rows={rows} selectedId={lastSelectedId} onSelect={onSelect3D}
+              planeScale={planeScale} zScale={zScale} heightmapUrl={heightmapUrl} />
           </section>
-
-          <NodeTable
-            rows={rows}
-            selectedId={selectedId}
-            fittedIds={fittedIds}
-            onSelect={setSelected}
-            onEdit={updateNode}
-          />
+          <NodeTable rows={rows} selectedIds={selectedIds} fittedIds={fittedIds}
+            onSelect={setSelected} onEdit={updateNode} />
         </>
       )}
 
       {selected && (
         <div className="selected-banner">
-          Selected: Node {selected.id} · {selected.strand} · ({selected.x.toFixed(2)},{' '}
-          {selected.y.toFixed(2)}, {selected.z.toFixed(2)}) · {selected.tags || 'no tags'}
+          {selectedIds.size > 1
+            ? `Selected: ${selectedIds.size} nodes · Last: Node ${selected.id} · ${selected.strand}`
+            : `Selected: Node ${selected.id} · ${selected.strand} · (${selected.x.toFixed(2)}, ${selected.y.toFixed(2)}, ${selected.z.toFixed(2)}) · ${selected.tags || 'no tags'}`
+          }
         </div>
       )}
     </main>
   );
 }
-// createRoot(document.getElementById('root')).render(<App />);
