@@ -451,21 +451,11 @@ function createMineGroundTexture() {
   return texture;
 }
 
-function addTerrainMesh(scene) {
+function addTerrainMesh(imageUrl = "/Heightmap_Joy2.png") {
   // Add Terrain Mesh
   const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
-  const textureLoader = new THREE.TextureLoader();
-    
-  // Loads from the 'public' folder in Vite
-  const heightmapTexture = textureLoader.load("/Heightmap_Joy2.png", () => {
-    material.needsUpdate = true;
-  });
-  heightmapTexture.wrapS = heightmapTexture.wrapT = THREE.RepeatWrapping;
-  heightmapTexture.repeat.set(1,1);
-  
   const material = new THREE.MeshStandardMaterial({
     color: 0x964B00,
-    displacementMap: heightmapTexture,
     displacementScale: 200, // Adjust based on your heightmap's contrast
     wireframe: true,
   });
@@ -473,6 +463,16 @@ function addTerrainMesh(scene) {
   const terrain = new THREE.Mesh(geometry, material);
   // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
   terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
+    
+  // Loads from the 'public' folder in Vite
+  const textureLoader = new THREE.TextureLoader();
+  textureLoader.load(imageUrl, (texture) => {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    material.displacementMap = texture;
+    material.needsUpdate = true;
+  });
+
   return terrain
 }
 
@@ -715,12 +715,13 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
   });
 }
 
-function View3D({ rows, selectedId, onSelect }) {
+function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
   const controlsRef = useRef(null);
   const sceneRef = useRef(null);
+  const terrainRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -765,7 +766,8 @@ function View3D({ rows, selectedId, onSelect }) {
     scene.add(fill);
 
     // TERRAIN FUNCTION
-    const terrain = addTerrainMesh(scene);
+    const terrain = addTerrainMesh(heightmapUrl);
+    terrainRef.current = terrain; 
     scene.add(terrain);
 
     // TERRAIN FUNCTION
@@ -864,7 +866,7 @@ function View3D({ rows, selectedId, onSelect }) {
       renderer.dispose();
       container.innerHTML = '';
     };
-  }, [onSelect]);
+  }, []);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -897,6 +899,20 @@ function View3D({ rows, selectedId, onSelect }) {
       controls.update();
     }
   }, [rows, selectedId]);
+
+  useEffect(() => {
+    if (!terrainRef.current || !heightmapUrl) return;
+    
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(heightmapUrl, (newTexture) => {
+      newTexture.wrapS = newTexture.wrapT = THREE.RepeatWrapping;
+      newTexture.repeat.set(1, 1);
+      
+      const material = terrainRef.current.material;
+      material.displacementMap = newTexture;
+      material.needsUpdate = true;
+    });
+  }, [heightmapUrl]);
 
   return (
     <section className="view3d">
@@ -966,6 +982,8 @@ function App() {
   const [rows, setRows] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [status, setStatus] = useState('Loading path_simple.csv...');
+
+  const [heightmapUrl, setHeightmapUrl] = useState('/Heightmap_Joy2.png');
 
   useEffect(() => {
     fetch(DEFAULT_CSV_PATH)
@@ -1075,6 +1093,21 @@ function App() {
           Upload CSV
         </label>
 
+         <label className="tool-btn">
+          <input
+            type="file"
+            accept="image/png, image/jpeg"
+            onChange={(e) => {
+              if (e.target.files?.[0]) {
+                const url = URL.createObjectURL(e.target.files[0]);
+                setHeightmapUrl(url);
+                setStatus('Loaded custom heightmap');
+              }
+            }}
+          />
+          Upload Heightmap
+        </label>
+
         <button className="primary" onClick={addNode}>+ Add Node</button>
         <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
           Delete Node
@@ -1108,7 +1141,7 @@ function App() {
               />
             </div>
 
-            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} />
+            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} heightmapUrl={heightmapUrl} />
           </section>
 
           <NodeTable rows={rows} selectedId={selectedId} onSelect={setSelected} onEdit={updateNode} />
