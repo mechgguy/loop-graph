@@ -762,8 +762,20 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
     mesh.userData.row = row;
 
     scene.add(mesh);
+    if (row.tags && row.tags.trim() !== "") {
+      const labelSprite = makeTextSprite(row.tags, "#ffffff");
+      
+      // Position the label slightly above the node
+      labelSprite.position.set(p.x, p.y, p.z + 15); 
+      
+      // Scale it down so it's not overwhelming
+      labelSprite.scale.set(40, 20, 1); 
+      
+      labelSprite.userData.dynamicGraph = true;
+      scene.add(labelSprite);
+    }
   });
-}
+  }
 
 function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   const containerRef = useRef(null);
