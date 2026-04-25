@@ -1241,6 +1241,25 @@ function App() {
     setStatus('Deleted selected node');
   }
 
+  function toggleStrand() {
+    if (selectedId === null) return;
+    
+    setRows((prev) => prev.map((r) => {
+      if (r.id === selectedId) {
+        const isCurrentlyCarry = r.strand === 'Carry';
+        return {
+          ...r,
+          strand: isCurrentlyCarry ? 'Return' : 'Carry',
+          strandValue: isCurrentlyCarry ? 1 : -1, // Carry is -1, Return is 1
+          group: isCurrentlyCarry ? 1 : 0         // Assuming group 1 = Return, 0 = Carry
+        };
+      }
+      return r;
+    }));
+
+    setStatus(`Switched Node ${selectedId} to ${selected?.strand === 'Carry' ? 'Return' : 'Carry'}`);
+}
+
   function exportFile(type) {
     const exportRows = rows.map((r) => ({
       id: r.id,
@@ -1267,7 +1286,7 @@ function App() {
   return (
     <main className="editor">
       <header className="topbar">
-        <div className="brand">VOITH</div>
+        <div className="brand">MineSight</div>
         <h1>Conveyor Layout Editor</h1>
 
         <div className="summary">
@@ -1326,6 +1345,16 @@ function App() {
           />
           Upload CSV
         </label>
+        
+        <button className="primary" onClick={addNode}>+ Add Node</button>
+        {/* NEW TOGGLE BUTTON */}
+        <button 
+            onClick={toggleStrand} 
+            disabled={selectedId === null}
+            style={{ borderLeft: '4px solid #0857f7' }}
+          >
+            ⇄ Switch Strand
+        </button>
 
         <button className="fit-btn" onClick={fitNodesToWireframe}>
           FIT
