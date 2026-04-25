@@ -496,21 +496,53 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 function addTerrainMesh(terrainScale, heightmapUrl) {
   const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
 
-  const geometry = new THREE.PlaneGeometry(effectiveTerrainSize, effectiveTerrainSize, 128, 128);
+  const geometry = new THREE.PlaneGeometry(
+    effectiveTerrainSize, 
+    effectiveTerrainSize, 
+    256, 
+    256
+  );
+  
   const textureLoader = new THREE.TextureLoader();
 
+  // We remove the hardcoded color/roughness here because the textures will handle it
   const material = new THREE.MeshStandardMaterial({
-    color: 0x964b00,
     displacementScale: TERRAIN_DISPLACEMENT_SCALE,
-    wireframe: true
+    wireframe: false,
+    flatShading: true,
+    side: THREE.DoubleSide
   });
 
+  // 1. Load the COLOR (Diffuse) texture for the rocks
+  textureLoader.load("/textures/moon_01_diff_4k.jpg", (diffuseTex) => {
+    diffuseTex.wrapS = diffuseTex.wrapT = THREE.RepeatWrapping;
+    diffuseTex.repeat.set(16, 16); // Tile it 16 times across the mine
+    diffuseTex.colorSpace = THREE.SRGBColorSpace; // Color textures must be sRGB
+    material.map = diffuseTex;
+    material.needsUpdate = true;
+  });
+
+  // 2. Load the ROUGHNESS texture
+  textureLoader.load("/textures/moon_01_rough_4k.jpg", (roughTex) => {
+    roughTex.wrapS = roughTex.wrapT = THREE.RepeatWrapping;
+    roughTex.repeat.set(16, 16); // Must match the repeat scale of the color map!
+    roughTex.colorSpace = THREE.NoColorSpace; // Data textures must not have color space
+    material.roughnessMap = roughTex;
+    material.needsUpdate = true;
+  });
+
+  // 3. Load the HEIGHTMAP (Displacement) for the mountain shape
   const heightmapTexture = textureLoader.load(heightmapUrl || HEIGHTMAP_PATH, () => {
     material.needsUpdate = true;
   });
 
-  heightmapTexture.wrapS = heightmapTexture.wrapT = THREE.RepeatWrapping;
+  // Heightmaps use Clamping to prevent weird cliffs at the borders
+  heightmapTexture.wrapS = THREE.ClampToEdgeWrapping;
+  heightmapTexture.wrapT = THREE.ClampToEdgeWrapping;
   heightmapTexture.repeat.set(1, 1);
+  
+  // Heightmaps are height data, not visual colors, so they must use NoColorSpace
+  heightmapTexture.colorSpace = THREE.NoColorSpace;
 
   material.displacementMap = heightmapTexture;
 
@@ -887,7 +919,7 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.05);
+    const sun = new THREE.DirectionalLight(0xfff5e6, 1.2);
     sun.position.set(300, -500, 800);
     scene.add(sun);
 
@@ -1183,7 +1215,7 @@ function App() {
       .catch(() => {
         setStatus('Could not load heightmap for FIT operation.');
       });
-  }, []);
+  }, [heightmapUrl]);
 
   const m = useMemo(() => metrics(rows), [rows]);
   const selected = rows.find((r) => r.id === selectedId);
