@@ -91,6 +91,7 @@ class ClosedLoopLayout:
         for i in range(n):
             B[i, i] = -1
             B[(i + 1) % n, i] = 1
+        # print(f'Incidence Matrix:\n',B)
         return B
 
     # -- edge geometry -------------------------------------------------------
@@ -119,11 +120,13 @@ class ClosedLoopLayout:
             i = int(np.where(B[:, s] == -1)[0][0])
             j = int(np.where(B[:, s] == 1)[0][0])
             A[i, j] = 1
+        # print(f'Adjancency Matrix:\n',A)
         return A
 
     def laplacian_matrix(self) -> np.ndarray:
         """Graph Laplacian D − A."""
         A = self.adjacency_matrix()
+        print (f'Adjacency Matrix:\n',A)
         return np.diag(A.sum(axis=1)) - A
 
     # -- group helpers -------------------------------------------------------
