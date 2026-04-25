@@ -112,14 +112,6 @@ function distance3d(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 }
 
-function makeCumulative(rows) {
-  let total = 0;
-  return rows.map((r, i) => {
-    if (i > 0) total += distanceHorizontal(rows[i - 1], r);
-    return { ...r, arc: total };
-  });
-}
-
 function metrics(rows) {
   if (!rows.length) {
     return { nodes: 0, carry: 0, ret: 0, lengthKm: 0, zMin: 0, zMax: 0 };
@@ -146,19 +138,83 @@ function metrics(rows) {
 
 function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const svgRef = useRef(null);
+  const [stretched, setStretched] = useState(false);
   const w = 760;
   const h = 255;
   const margin = { top: 32, right: 24, bottom: 40, left: 56 };
 
-  const dataByStrand = ['Carry', 'Return'].map((s) =>
-    makeCumulative(sortedByStrand(rows, s))
-  );
+  const carryRows = sortedByStrand(rows, 'Carry');
+  const returnRows = sortedByStrand(rows, 'Return');
+  
+  // Calculate cumulative arc length for stretched view
+  const getArcData = (strandRows, startOffset = 0) => {
+    if (strandRows.length === 0) return [];
+    let total = startOffset;
+    return strandRows.map((r, i) => {
+      if (i > 0) total += distanceHorizontal(strandRows[i - 1], r);
+      return { ...r, arc: total };
+    });
+  };
+  
+  // For stretched view, Return strand should continue from Carry strand's end
+  const carryArc = getArcData(carryRows, 0);
+  const carryTotalLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
+  const returnArc = getArcData(returnRows, carryTotalLength);
+  
+  // For stretched side view, use cumulative arc length as X
+  const getDataForDisplay = () => {
+    if (mode === 'side' && stretched) {
+      return {
+        carry: carryArc,
+        ret: returnArc,
+        all: [...carryArc, ...returnArc]
+      };
+    }
+    
+    // For projected side view
+    if (mode === 'side') {
+      // Keep original order for Carry (0->5 ascending X)
+      // Keep original order for Return (6->11 descending X)
+      return {
+        carry: carryRows,
+        ret: returnRows,
+        all: [...carryRows, ...returnRows]
+      };
+    }
+    
+    // For top view, use original order
+    return {
+      carry: carryRows,
+      ret: returnRows,
+      all: [...carryRows, ...returnRows]
+    };
+  };
+  
+  const displayData = getDataForDisplay();
+  
+  // For line drawing, use the natural order of each strand
+  const getRowsForLine = (strandRows, strandType) => {
+    if (mode === 'side' && !stretched) {
+      // For projected side view, don't sort! Keep the natural flow order
+      // Carry flows left to right (ascending X), Return flows right to left (descending X)
+      return strandRows;
+    }
+    return strandRows;
+  };
+  
+  const dataByStrand = [
+    { strand: 'Carry', rows: displayData.carry },
+    { strand: 'Return', rows: displayData.ret }
+  ];
+  
+  const all = displayData.all;
 
-  const all = dataByStrand.flat();
-
-  const xValue = mode === 'side' ? (d) => d.arc : (d) => d.x;
+  const xValue = (mode === 'side' && stretched) 
+    ? (d) => d.arc 
+    : (d) => d.x;
   const yValue = mode === 'side' ? (d) => d.z : (d) => d.y;
 
+  // Use the full range of values
   const xDomain = d3.extent(all, xValue);
   const yDomain = d3.extent(all, yValue);
 
@@ -177,7 +233,8 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const line = d3
     .line()
     .x((d) => x(xValue(d)))
-    .y((d) => y(yValue(d)));
+    .y((d) => y(yValue(d)))
+    .defined((d) => true);
 
   function startDrag(event, d) {
     event.preventDefault();
@@ -204,9 +261,61 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     window.addEventListener('mouseup', up);
   }
 
+  const formatNumber = (num) => {
+    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num.toFixed(0);
+  };
+
+  // Calculate total length for display
+  const totalCarryLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
+  const totalReturnLength = returnArc.length > 0 ? returnArc[returnArc.length - 1].arc - carryTotalLength : 0;
+
   return (
     <section className="plot-card">
-      <h3>{title}</h3>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '12px',
+        minHeight: '32px'
+      }}>
+        <h3 style={{ margin: 0, fontSize: '0.9rem' }}>{title}</h3>
+        {mode === 'side' && (
+          <button
+            onClick={() => setStretched(!stretched)}
+            style={{
+              padding: '6px 12px',
+              fontSize: '11px',
+              background: stretched ? '#e52b2f' : '#333',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {stretched ? '📏 Stretched View' : '🗺️ Projected View'}
+          </button>
+        )}
+      </div>
+      
+      {mode === 'side' && stretched && (
+        <div style={{ 
+          fontSize: '11px', 
+          color: '#888', 
+          marginBottom: '12px', 
+          textAlign: 'center',
+          padding: '4px 8px',
+          background: 'rgba(0,0,0,0.2)',
+          borderRadius: '4px'
+        }}>
+          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
+          <span style={{ marginLeft: '12px', fontSize: '10px' }}>
+            (X-axis shows true belt length)
+          </span>
+        </div>
+      )}
 
       <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
         <g className="gridlines">
@@ -218,22 +327,51 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           ))}
         </g>
 
+        {/* X-axis tick labels */}
+        <g className="x-axis-labels" fontSize="10" fill="#999" textAnchor="middle">
+          {x.ticks(8).map((t) => (
+            <text key={`xtick${t}`} x={x(t)} y={h - margin.bottom + 15}>
+              {formatNumber(t)}
+            </text>
+          ))}
+        </g>
+
+        {/* Y-axis tick labels */}
+        <g className="y-axis-labels" fontSize="10" fill="#999" textAnchor="end">
+          {y.ticks(5).map((t) => (
+            <text key={`ytick${t}`} x={margin.left - 8} y={y(t) + 3}>
+              {formatNumber(t)}
+            </text>
+          ))}
+        </g>
+
         <g className="axis-labels">
-          <text x={w / 2} y={h - 8}>
-            {mode === 'side' ? 'Cumulative arc length (m)' : 'X (m)'}
+          {/* X-axis label */}
+          <text x={w / 2} y={h - 8} textAnchor="middle" fontSize="12" fill="#888">
+            {mode === 'side' 
+              ? (stretched ? 'Belt Arc Length (m) →' : 'Horizontal Distance X (m) →')
+              : 'X (m) →'}
           </text>
-          <text transform={`translate(16 ${h / 2}) rotate(-90)`}>
-            {mode === 'side' ? 'Z (m)' : 'Y (m)'}
+          
+          {/* Y-axis label */}
+          <text 
+            transform={`translate(12 ${h / 2}) rotate(-90)`} 
+            textAnchor="middle" 
+            fontSize="12" 
+            fill="#888"
+          >
+            {mode === 'side' ? '↑ Elevation Z (m)' : '↑ Y (m)'}
           </text>
         </g>
 
         {dataByStrand.map(
-          (lineRows) =>
-            lineRows.length > 1 && (
+          (strandData) =>
+            strandData.rows.length > 1 && (
               <path
-                key={lineRows[0].strand}
-                className={lineRows[0].strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
-                d={line(lineRows)}
+                key={strandData.strand}
+                className={strandData.strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
+                d={line(getRowsForLine(strandData.rows, strandData.strand))}
+                opacity={stretched ? 1 : 0.8}
               />
             )
         )}
@@ -251,10 +389,15 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           />
         ))}
       </svg>
+      
+      {mode === 'side' && (
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', textAlign: 'center' }}>
+          💡 Tip: Toggle between Projected (actual X vs Z) and Stretched (true belt length vs Z)
+        </div>
+      )}
     </section>
   );
 }
-
 function createMineGroundTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
