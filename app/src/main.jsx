@@ -1,4 +1,5 @@
-createRoot(document.getElementById('root')).render(<App />);import React, { useEffect, useMemo, useRef, useState } from 'react';
+createRoot(document.getElementById('root')).render(<App />);
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Papa from 'papaparse';
 import * as d3 from 'd3';
@@ -10,13 +11,23 @@ const RETURN = '#e52b2f';
 const CARRY = '#0037d8';
 const DEFAULT_CSV_PATH = '/path_simple.csv';
 
-const TERRAIN_SIZE = 1000;
-const TERRAIN_DISPLACEMENT_SCALE = 200;
+const TERRAIN_SIZE = 1000; // metres at planeScale = 1
+const TERRAIN_DISPLACEMENT_SCALE = 200; // metres at zScale = 1
 const HEIGHTMAP_PATH = '/Heightmap_Joy2.png';
+
+const GRID_SIZE_METERS = 2600;
+const GRID_SPACING_METERS = 10;
+
+const MIN_CLEARANCE_ABOVE_WIREFRAME = 20;
+const MAX_CLEARANCE_ABOVE_WIREFRAME = 50;
 
 function num(v, fallback = 0) {
   const n = Number(String(v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function tagsToString(value) {
@@ -495,6 +506,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 
 function addTerrainMesh(terrainScale, heightmapUrl) {
   const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
+  const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
 
   const geometry = new THREE.PlaneGeometry(
     effectiveTerrainSize, 
@@ -889,6 +901,8 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       container.removeChild(container.firstChild);
     }
 
+    container.innerHTML = '';
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x030711);
     sceneRef.current = scene;
@@ -932,8 +946,14 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     terrainRef.current = terrain;
     scene.add(terrain);
 
-    // Add grid
-    const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
+    const gridDivisions = GRID_SIZE_METERS / GRID_SPACING_METERS;
+    // const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
+    const grid = new THREE.GridHelper(
+      GRID_SIZE_METERS,
+      gridDivisions,
+      0x4b4030,
+      0x2d271f
+    );
     grid.rotation.x = Math.PI / 2;
     grid.position.z = 0.04;
     scene.add(grid);
@@ -996,7 +1016,8 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     const mouse = new THREE.Vector2();
 
     function onClick(event) {
-      const clickable = [];
+      const clickable = scene.children.filter((obj) => obj.userData?.row);
+      // const clickable = [];
       scene.traverse((obj) => {
         if (obj.userData?.row) {
           clickable.push(obj);
@@ -1041,8 +1062,10 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
       renderer.domElement.removeEventListener('click', onClick);
       controls.dispose();
       renderer.dispose();
+      container.innerHTML = '';
     };
-  }, [terrainScale, heightmapUrl]); // Only rebuild when these change
+  // }, [terrainScale, heightmapUrl]); // Only rebuild when these change
+  }, [onSelect, terrainScale, heightmapUrl]);
 
   // Update conveyors when rows or selectedId change
   useEffect(() => {
@@ -1090,7 +1113,6 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     buildConveyor(scene, sortedByStrand(rows, 'Carry'), 'Carry', toVec, selectedId);
     buildConveyor(scene, sortedByStrand(rows, 'Return'), 'Return', toVec, selectedId);
 
-    // Restore original add
     scene.add = originalAdd;
   }, [rows, selectedId]);
 
@@ -1109,12 +1131,25 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
     });
   }, [heightmapUrl]);
 
+  // const controls = controlsRef.current;
+
+  // if (controls) {
+  //   controls.target.set(0, 0, 0);
+  //   controls.update();
+  // }
+  // }, [rows, selectedId, terrainScale, heightmapUrl]);
+  const terrainFootprint = TERRAIN_SIZE * terrainScale;
+  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
+
   return (
     <section className="view3d">
       <div className="view-head">
         <h3>3D CONVEYOR VIEW</h3>
         <span className="hint">
           Drag rotate · Scroll zoom · Right-click pan · Click node · Wireframe scale {terrainScale.toFixed(2)}x
+          {/* 1 unit = 1 m · Grid {GRID_SPACING_METERS} m · Terrain {terrainFootprint.toFixed(0)} m ×{' '}
+          {terrainFootprint.toFixed(0)} m · Height range {terrainHeightRange.toFixed(0)} m */}
+
         </span>
       </div>
       <div ref={containerRef} className="three-container" />
@@ -1122,6 +1157,64 @@ function View3D({ rows, selectedId, onSelect, terrainScale, heightmapUrl }) {
   );
 }
 
+// FROM GROUP
+// function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
+//   return (
+//     <div className="table-wrap">
+//       <table>
+//         <thead>
+//           <tr>
+//             <th>ID</th>
+//             <th>STRAND</th>
+//             <th>X (m)</th>
+//             <th>Y (m)</th>
+//             <th>Z (m)</th>
+//             <th>TAGS</th>
+//           </tr>
+//         </thead>
+
+//         <tbody>
+//           {rows.map((r) => (
+//             <tr
+//               key={r.id}
+//               className={[
+//                 selectedId === r.id ? 'selected-row' : '',
+//                 fittedIds?.has(r.id) ? 'fitted-row' : ''
+//               ].join(' ')}
+//               onClick={() => onSelect(r)}
+//               title={
+//                 fittedIds?.has(r.id) && r.wireframeZ !== null
+//                   ? `Adjusted to wireframe Z = ${Number(r.wireframeZ).toFixed(2)} m`
+//                   : ''
+//               }
+//             >
+//               <td>{r.id}</td>
+
+//               <td>
+//                 <span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>
+//                   {r.strand}
+//                 </span>
+//               </td>
+
+//               {['x', 'y', 'z'].map((k) => (
+//                 <td key={k}>
+//                   <input
+//                     value={Number(r[k]).toFixed(2)}
+//                     onChange={(e) => onEdit(r.id, { [k]: num(e.target.value, r[k]) })}
+//                   />
+//                 </td>
+//               ))}
+
+//               <td>
+//                 <input value={r.tags} onChange={(e) => onEdit(r.id, { tags: e.target.value })} />
+//               </td>
+//             </tr>
+//           ))}
+//         </tbody>
+//       </table>
+//     </div>
+//   );
+// }
 
 function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
   return (
@@ -1134,47 +1227,57 @@ function NodeTable({ rows, selectedId, fittedIds, onSelect, onEdit }) {
             <th>X (m)</th>
             <th>Y (m)</th>
             <th>Z (m)</th>
+            <th>OFFSET FROM TERRAIN</th>
             <th>TAGS</th>
           </tr>
         </thead>
 
         <tbody>
-          {rows.map((r) => (
-            <tr
-              key={r.id}
-              className={[
-                selectedId === r.id ? 'selected-row' : '',
-                fittedIds?.has(r.id) ? 'fitted-row' : ''
-              ].join(' ')}
-              onClick={() => onSelect(r)}
-              title={
-                fittedIds?.has(r.id) && r.wireframeZ !== null
-                  ? `Adjusted to wireframe Z = ${Number(r.wireframeZ).toFixed(2)} m`
-                  : ''
-              }
-            >
-              <td>{r.id}</td>
+          {rows.map((r) => {
+            const offset =
+              Number.isFinite(r.wireframeZ) && r.wireframeZ !== null
+                ? r.z - r.wireframeZ
+                : null;
 
-              <td>
-                <span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>
-                  {r.strand}
-                </span>
-              </td>
+            return (
+              <tr
+                key={r.id}
+                className={[
+                  selectedId === r.id ? 'selected-row' : '',
+                  fittedIds?.has(r.id) ? 'fitted-row' : ''
+                ].join(' ')}
+                onClick={() => onSelect(r)}
+                title={
+                  fittedIds?.has(r.id) && r.wireframeZ !== null
+                    ? `Adjusted. Wireframe Z = ${Number(r.wireframeZ).toFixed(2)} m`
+                    : ''
+                }
+              >
+                <td>{r.id}</td>
 
-              {['x', 'y', 'z'].map((k) => (
-                <td key={k}>
-                  <input
-                    value={Number(r[k]).toFixed(2)}
-                    onChange={(e) => onEdit(r.id, { [k]: num(e.target.value, r[k]) })}
-                  />
+                <td>
+                  <span className={`pill ${r.strand === 'Return' ? 'return' : ''}`}>
+                    {r.strand}
+                  </span>
                 </td>
-              ))}
 
-              <td>
-                <input value={r.tags} onChange={(e) => onEdit(r.id, { tags: e.target.value })} />
-              </td>
-            </tr>
-          ))}
+                {['x', 'y', 'z'].map((k) => (
+                  <td key={k}>
+                    <input
+                      value={Number(r[k]).toFixed(2)}
+                      onChange={(e) => onEdit(r.id, { [k]: num(e.target.value, r[k]) })}
+                    />
+                  </td>
+                ))}
+
+                <td>{offset === null ? '—' : `${offset.toFixed(2)} m`}</td>
+
+                <td>
+                  <input value={r.tags} onChange={(e) => onEdit(r.id, { tags: e.target.value })} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1219,6 +1322,9 @@ function App() {
 
   const m = useMemo(() => metrics(rows), [rows]);
   const selected = rows.find((r) => r.id === selectedId);
+  
+  const terrainFootprint = TERRAIN_SIZE * terrainScale;
+  const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
 
   function setSelected(row) {
     setSelectedId(row.id);
@@ -1226,6 +1332,12 @@ function App() {
   }
 
   function updateNode(id, patch) {
+    const nextPatch = { ...patch };
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'z')) {
+      nextPatch.originalZ = patch.z;
+    }
+
     setRows((prev) =>
       prev.map((r) =>
         r.id === id
@@ -1281,6 +1393,7 @@ function App() {
     const yMid = (Math.min(...ys) + Math.max(...ys)) / 2;
 
     const effectiveTerrainSize = TERRAIN_SIZE * terrainScale;
+    const effectiveDisplacementScale = TERRAIN_DISPLACEMENT_SCALE * heightmapUrl;
     const adjusted = new Set();
 
     const fittedRows = rows.map((row) => {
@@ -1291,15 +1404,35 @@ function App() {
       const localX = row.x - xMid;
       const localY = row.y - yMid;
 
-      const wireframeZ = heightSampler(localX, localY, effectiveTerrainSize);
+      const wireframeZ = heightSampler(localX, localY, effectiveTerrainSize,
+        effectiveDisplacementScale
+      );
+
+      const baseZ = Number.isFinite(row.originalZ) ? row.originalZ : row.z;
 
       if (wireframeZ === null) {
         return {
           ...row,
+          z: baseZ,
           fittedToWireframe: false,
           wireframeZ: null
         };
       }
+
+      let fittedZ = baseZ;
+
+      // JOY
+      // if (baseZ < wireframeZ) {
+      //   fittedZ = wireframeZ + MIN_CLEARANCE_ABOVE_WIREFRAME;
+      // } else {
+      //   fittedZ = Math.min(baseZ, wireframeZ + MAX_CLEARANCE_ABOVE_WIREFRAME);
+      // }
+
+      // const changed = Math.abs(fittedZ - baseZ) > 1e-6;
+
+      // if (changed) {
+      //   adjusted.add(row.id);
+      // }
 
       if (row.z < wireframeZ) {
         adjusted.add(row.id);
@@ -1314,7 +1447,9 @@ function App() {
 
       return {
         ...row,
+        z: fittedZ,
         fittedToWireframe: false,
+        // fittedToWireframe: changed, // JOY
         wireframeZ
       };
     });
@@ -1514,6 +1649,9 @@ function App() {
           </b>
           <span>·</span>
           Wireframe <b>{terrainScale.toFixed(2)}x</b>
+          Terrain <b>{terrainFootprint.toFixed(0)} m</b>
+          <span>·</span>
+          Height <b>{terrainHeightRange.toFixed(0)} m</b>
         </div>
       </header>
 
