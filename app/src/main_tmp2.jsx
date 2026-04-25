@@ -209,20 +209,17 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     }
     return strandRows;
   };
-  
-  const dataByStrand = [
-    { strand: 'Carry', rows: displayData.carry },
-    { strand: 'Return', rows: displayData.ret }
-  ];
-  
-  const all = displayData.all;
 
-  const xValue = (mode === 'side' && stretched) 
-    ? (d) => d.arc 
-    : (d) => d.x;
+
+  const dataByStrand = ['Carry', 'Return'].map((s) =>
+    makeCumulative(sortedByStrand(rows, s))
+  );
+
+  const all = dataByStrand.flat();
+
+  const xValue = mode === 'side' ? (d) => d.arc : (d) => d.x;
   const yValue = mode === 'side' ? (d) => d.z : (d) => d.y;
 
-    // Use the full range of values
   const xDomain = d3.extent(all, xValue);
   const yDomain = d3.extent(all, yValue);
 
@@ -241,8 +238,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
   const line = d3
     .line()
     .x((d) => x(xValue(d)))
-    .y((d) => y(yValue(d)))
-    .defined((d) => true);
+    .y((d) => y(yValue(d)));
 
   function startDrag(event, d) {
     event.preventDefault();
@@ -269,61 +265,8 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     window.addEventListener('mouseup', up);
   }
 
-  const formatNumber = (num) => {
-    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(1) + 'k';
-    return num.toFixed(0);
-  };
-
-  // Calculate total length for display
-  const totalCarryLength = carryArc.length > 0 ? carryArc[carryArc.length - 1].arc : 0;
-  const totalReturnLength = returnArc.length > 0 ? returnArc[returnArc.length - 1].arc - carryTotalLength : 0;
-
   return (
     <section className="plot-card">
-            <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '12px',
-        minHeight: '32px'
-      }}>
-        <h3 style={{ margin: 0, fontSize: '0.9rem' }}>{title}</h3>
-        {mode === 'side' && (
-          <button
-            onClick={() => setStretched(!stretched)}
-            style={{
-              padding: '6px 12px',
-              fontSize: '11px',
-              background: stretched ? '#e52b2f' : '#333',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {stretched ? '📏 Stretched View' : '🗺️ Projected View'}
-          </button>
-        )}
-      </div>
-      
-      {mode === 'side' && stretched && (
-        <div style={{ 
-          fontSize: '11px', 
-          color: '#888', 
-          marginBottom: '12px', 
-          textAlign: 'center',
-          padding: '4px 8px',
-          background: 'rgba(0,0,0,0.2)',
-          borderRadius: '4px'
-        }}>
-          Carry length: {totalCarryLength.toFixed(0)}m | Return length: {totalReturnLength.toFixed(0)}m
-          <span style={{ marginLeft: '12px', fontSize: '10px' }}>
-            (X-axis shows true belt length)
-          </span>
-        </div>
-      )}
       <h3>{title}</h3>
 
       <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
@@ -336,51 +279,22 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           ))}
         </g>
 
-        {/* X-axis tick labels */}
-        <g className="x-axis-labels" fontSize="10" fill="#999" textAnchor="middle">
-          {x.ticks(8).map((t) => (
-            <text key={`xtick${t}`} x={x(t)} y={h - margin.bottom + 15}>
-              {formatNumber(t)}
-            </text>
-          ))}
-        </g>
-
-        {/* Y-axis tick labels */}
-        <g className="y-axis-labels" fontSize="10" fill="#999" textAnchor="end">
-          {y.ticks(5).map((t) => (
-            <text key={`ytick${t}`} x={margin.left - 8} y={y(t) + 3}>
-              {formatNumber(t)}
-            </text>
-          ))}
-        </g>
-
         <g className="axis-labels">
-          {/* X-axis label */}
-          <text x={w / 2} y={h - 8} textAnchor="middle" fontSize="12" fill="#888">
-            {mode === 'side' 
-              ? (stretched ? 'Belt Arc Length (m) →' : 'Horizontal Distance X (m) →')
-              : 'X (m) →'}
+          <text x={w / 2} y={h - 8}>
+            {mode === 'side' ? 'Cumulative arc length (m)' : 'X (m)'}
           </text>
-          
-          {/* Y-axis label */}
-          <text 
-            transform={`translate(12 ${h / 2}) rotate(-90)`}
-            textAnchor="middle" 
-            fontSize="12" 
-            fill="#888"
-          >
-            {mode === 'side' ? '↑ Elevation Z (m)' : '↑ Y (m)'}
+          <text transform={`translate(16 ${h / 2}) rotate(-90)`}>
+            {mode === 'side' ? 'Z (m)' : 'Y (m)'}
           </text>
         </g>
 
         {dataByStrand.map(
-          (strandData) =>
-            strandData.length > 1 && (
+          (lineRows) =>
+            lineRows.length > 1 && (
               <path
-                key={strandData[0].strand}
-                className={strandData[0].strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
-                d={line(getRowsForLine(strandData.rows, strandData.strand))}
-                opacity={stretched ? 1 : 0.8}
+                key={lineRows[0].strand}
+                className={lineRows[0].strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
+                d={line(lineRows)}
               />
             )
         )}
@@ -398,15 +312,10 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           />
         ))}
       </svg>
-
-      {mode === 'side' && (
-        <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', textAlign: 'center' }}>
-          💡 Tip: Toggle between Projected (actual X vs Z) and Stretched (true belt length vs Z)
-        </div>
-      )}
     </section>
   );
 }
+
 function createMineGroundTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -458,51 +367,6 @@ function createMineGroundTexture() {
   texture.anisotropy = 8;
 
   return texture;
-}
-
-function addTerrainMesh(imageUrl = "/Highland_valley.png") {
-  // // Add Terrain Mesh
-  // const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
-  // const material = new THREE.MeshStandardMaterial({
-  //   color: 0x964B00,
-  //   displacementScale: 200, // Adjust based on your heightmap's contrast
-  //   wireframe: true,
-  // });
-
-  // const terrain = new THREE.Mesh(geometry, material);
-  // // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
-  // terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
-    
-  // // Loads from the 'public' folder in Vite
-  // const textureLoader = new THREE.TextureLoader();
-  // textureLoader.load(imageUrl, (texture) => {
-  //   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  //   texture.repeat.set(1, 1);
-  //   material.displacementMap = texture;
-  //   material.needsUpdate = true;
-
-    // Add Terrain Mesh
-  const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x964B00,
-    displacementScale: 200, // Adjust based on your heightmap's contrast
-    wireframe: true,
-  });
-
-  const terrain = new THREE.Mesh(geometry, material);
-  // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
-  terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
-    
-  // Loads from the 'public' folder in Vite
-  const textureLoader = new THREE.TextureLoader();
-  textureLoader.load(imageUrl, (texture) => {
-    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(1, 1);
-    material.displacementMap = texture;
-    material.needsUpdate = true;
-  });
-
-  return terrain
 }
 
 function makeTextSprite(text, color = '#ffffff') {
@@ -744,13 +608,12 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
   });
 }
 
-function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
+function View3D({ rows, selectedId, onSelect }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
   const controlsRef = useRef(null);
   const sceneRef = useRef(null);
-  const terrainRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -794,29 +657,23 @@ function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
     fill.position.set(-500, 400, 250);
     scene.add(fill);
 
-    // TERRAIN FUNCTION
-    const terrain = addTerrainMesh(heightmapUrl);
-    terrainRef.current = terrain; 
-    scene.add(terrain);
+    const groundGeometry = new THREE.PlaneGeometry(2600, 2600, 120, 120);
+    const groundTexture = createMineGroundTexture();
 
-    // TERRAIN FUNCTION
-    // const groundGeometry = new THREE.PlaneGeometry(2600, 2600, 120, 120);
-    // const groundTexture = createMineGroundTexture();
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      map: groundTexture,
+      roughness: 1,
+      metalness: 0,
+      color: 0xd1b078,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
 
-    // const groundMaterial = new THREE.MeshStandardMaterial({
-    //   map: groundTexture,
-    //   roughness: 1,
-    //   metalness: 0,
-    //   color: 0xd1b078,
-    //   transparent: true,
-    //   opacity: 0.82,
-    //   side: THREE.DoubleSide,
-    //   depthWrite: false
-    // });
-
-    // const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    // ground.position.z = 0;
-    // scene.add(ground);
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.position.z = 0;
+    scene.add(ground);
 
     const grid = new THREE.GridHelper(2600, 65, 0x4b4030, 0x2d271f);
     grid.rotation.x = Math.PI / 2;
@@ -895,7 +752,6 @@ function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
       renderer.dispose();
       container.innerHTML = '';
     };
-  // }, []);
   }, [onSelect]);
 
   useEffect(() => {
@@ -929,20 +785,6 @@ function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
       controls.update();
     }
   }, [rows, selectedId]);
-
-  useEffect(() => {
-    if (!terrainRef.current || !heightmapUrl) return;
-    
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(heightmapUrl, (newTexture) => {
-      newTexture.wrapS = newTexture.wrapT = THREE.RepeatWrapping;
-      newTexture.repeat.set(1, 1);
-      
-      const material = terrainRef.current.material;
-      material.displacementMap = newTexture;
-      material.needsUpdate = true;
-    });
-  }, [heightmapUrl]);
 
   return (
     <section className="view3d">
@@ -1013,8 +855,6 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [status, setStatus] = useState('Loading path_simple.csv...');
 
-  const [heightmapUrl, setHeightmapUrl] = useState('/Heightmap_Joy2.png');
-
   useEffect(() => {
     fetch(DEFAULT_CSV_PATH)
       .then((res) => {
@@ -1044,23 +884,39 @@ function App() {
   }
 
   function addNode() {
-    const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
-    const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
-
-    const node = {
-      id,
-      strand: 'Carry',
-      strandValue: -1,
-      group: 0,
-      x: last.x + 50,
-      y: last.y,
-      z: last.z,
-      tags: ''
-    };
-
-    setRows((r) => [...r, node]);
-    setSelectedId(id);
-    setStatus(`Added node ${id}`);
+    setRows((currentRows) => {
+      // 1. Calculate the new ID based on the MOST RECENT state
+      const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
+      const newId = maxId + 1;
+  
+      // 2. Find the template (selected node) from the MOST RECENT state
+      // We use the 'selectedId' from the outer scope
+      const selectedNode = currentRows.find(r => r.id === selectedId);
+      
+      // 3. Find the last node for positioning
+      const last = currentRows[currentRows.length - 1] ?? { x: 0, y: 0, z: 0 };
+  
+      // 4. Build the new node
+      const newNode = {
+        id: newId,
+        strand: selectedNode ? selectedNode.strand : 'Carry',
+        strandValue: selectedNode ? selectedNode.strandValue : -1,
+        group: selectedNode ? selectedNode.group : 0,
+        x: last.x + 50,
+        y: last.y,
+        z: last.z,
+        tags: ''
+      };
+  
+      // 5. Update Status and Selection (Side effects)
+      // We use setTimeout to move these out of the render-cycle calculation
+      setTimeout(() => {
+        setSelectedId(newId);
+        setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
+      }, 0);
+  
+      return [...currentRows, newNode];
+    });
   }
 
   function deleteNode() {
@@ -1069,6 +925,25 @@ function App() {
     setSelectedId(null);
     setStatus('Deleted selected node');
   }
+
+  function toggleStrand() {
+    if (selectedId === null) return;
+    
+    setRows((prev) => prev.map((r) => {
+      if (r.id === selectedId) {
+        const isCurrentlyCarry = r.strand === 'Carry';
+        return {
+          ...r,
+          strand: isCurrentlyCarry ? 'Return' : 'Carry',
+          strandValue: isCurrentlyCarry ? 1 : -1, // Carry is -1, Return is 1
+          group: isCurrentlyCarry ? 1 : 0         // Assuming group 1 = Return, 0 = Carry
+        };
+      }
+      return r;
+    }));
+
+    setStatus(`Switched Node ${selectedId} to ${selected?.strand === 'Carry' ? 'Return' : 'Carry'}`);
+}
 
   function exportFile(type) {
     const exportRows = rows.map((r) => ({
@@ -1096,7 +971,7 @@ function App() {
   return (
     <main className="editor">
       <header className="topbar">
-        <div className="brand">VOITH</div>
+        <div className="brand">MineSight</div>
         <h1>Conveyor Layout Editor</h1>
 
         <div className="summary">
@@ -1123,22 +998,16 @@ function App() {
           Upload CSV
         </label>
 
-         <label className="tool-btn">
-          <input
-            type="file"
-            accept="image/png, image/jpeg"
-            onChange={(e) => {
-              if (e.target.files?.[0]) {
-                const url = URL.createObjectURL(e.target.files[0]);
-                setHeightmapUrl(url);
-                setStatus('Loaded custom heightmap');
-              }
-            }}
-          />
-          Upload Heightmap
-        </label>
-
         <button className="primary" onClick={addNode}>+ Add Node</button>
+        {/* NEW TOGGLE BUTTON */}
+        <button 
+            onClick={toggleStrand} 
+            disabled={selectedId === null}
+            style={{ borderLeft: '4px solid #0857f7' }}
+          >
+            ⇄ Switch Strand
+          </button>
+
         <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
           Delete Node
         </button>
@@ -1171,7 +1040,7 @@ function App() {
               />
             </div>
 
-            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} heightmapUrl={heightmapUrl} />
+            <View3D rows={rows} selectedId={selectedId} onSelect={setSelected} />
           </section>
 
           <NodeTable rows={rows} selectedId={selectedId} onSelect={setSelected} onEdit={updateNode} />
@@ -1188,4 +1057,3 @@ function App() {
     </main>
   );
 }
-

@@ -27,7 +27,6 @@ def load_csv(path: Path) -> list[Node]:
 
 def main() -> None:
     csv_path = DATA_DIR / "path_simple.csv"
-    # csv_path = DATA_DIR / "path_curved.csv"
     nodes = load_csv(csv_path)
 
     print(f"Loaded {len(nodes)} nodes from {csv_path.name}")
