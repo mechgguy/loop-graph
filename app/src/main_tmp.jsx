@@ -1,4 +1,5 @@
-createRoot(document.getElementById('root')).render(<App />);import React, { useEffect, useMemo, useRef, useState } from 'react';
+createRoot(document.getElementById('root')).render(<App />);
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Papa from 'papaparse';
 import * as d3 from 'd3';
@@ -112,14 +113,6 @@ function distance3d(a, b) {
   return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 }
 
-function makeCumulative(rows) {
-  let total = 0;
-  return rows.map((r, i) => {
-    if (i > 0) total += distanceHorizontal(rows[i - 1], r);
-    return { ...r, arc: total };
-  });
-}
-
 function metrics(rows) {
   if (!rows.length) {
     return { nodes: 0, carry: 0, ret: 0, lengthKm: 0, zMin: 0, zMax: 0 };
@@ -222,7 +215,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
     : (d) => d.x;
   const yValue = mode === 'side' ? (d) => d.z : (d) => d.y;
 
-    // Use the full range of values
+  // Use the full range of values
   const xDomain = d3.extent(all, xValue);
   const yDomain = d3.extent(all, yValue);
 
@@ -280,7 +273,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 
   return (
     <section className="plot-card">
-            <div style={{ 
+      <div style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center', 
@@ -324,7 +317,6 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           </span>
         </div>
       )}
-      <h3>{title}</h3>
 
       <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`}>
         <g className="gridlines">
@@ -364,7 +356,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           
           {/* Y-axis label */}
           <text 
-            transform={`translate(12 ${h / 2}) rotate(-90)`}
+            transform={`translate(12 ${h / 2}) rotate(-90)`} 
             textAnchor="middle" 
             fontSize="12" 
             fill="#888"
@@ -375,10 +367,10 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
 
         {dataByStrand.map(
           (strandData) =>
-            strandData.length > 1 && (
+            strandData.rows.length > 1 && (
               <path
-                key={strandData[0].strand}
-                className={strandData[0].strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
+                key={strandData.strand}
+                className={strandData.strand === 'Return' ? 'plot-line return' : 'plot-line carry'}
                 d={line(getRowsForLine(strandData.rows, strandData.strand))}
                 opacity={stretched ? 1 : 0.8}
               />
@@ -398,7 +390,7 @@ function MiniPlot({ title, mode, rows, selectedId, onSelect, onDragNode }) {
           />
         ))}
       </svg>
-
+      
       {mode === 'side' && (
         <div style={{ fontSize: '10px', color: '#666', marginTop: '8px', textAlign: 'center' }}>
           💡 Tip: Toggle between Projected (actual X vs Z) and Stretched (true belt length vs Z)
@@ -875,8 +867,7 @@ function View3D({ rows, selectedId, onSelect, heightmapUrl}) {
       renderer.dispose();
       container.innerHTML = '';
     };
-  // }, []);
-  }, [onSelect]);
+  }, []);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -1024,61 +1015,24 @@ function App() {
   }
 
   function addNode() {
-    setRows((currentRows) => {
-      // 1. Calculate the new ID based on the MOST RECENT state
-      const maxId = currentRows.reduce((max, r) => Math.max(max, Number(r.id) || 0), -1);
-      const newId = maxId + 1;
-  
-      // 2. Find the template (selected node) from the MOST RECENT state
-      // We use the 'selectedId' from the outer scope
-      const selectedNode = currentRows.find(r => r.id === selectedId);
-      
-      // 3. Find the last node for positioning
-      const last = currentRows[currentRows.length - 1] ?? { x: 0, y: 0, z: 0 };
-  
-      // 4. Build the new node
-      const newNode = {
-        id: newId,
-        strand: selectedNode ? selectedNode.strand : 'Carry',
-        strandValue: selectedNode ? selectedNode.strandValue : -1,
-        group: selectedNode ? selectedNode.group : 0,
-        x: last.x + 50,
-        y: last.y,
-        z: last.z,
-        tags: ''
-      };
-  
-      // 5. Update Status and Selection (Side effects)
-      // We use setTimeout to move these out of the render-cycle calculation
-      setTimeout(() => {
-        setSelectedId(newId);
-        setStatus(`Added node ${newId} inheriting ${newNode.strand}`);
-      }, 0);
-  
-      return [...currentRows, newNode];
-    });
+    const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
+    const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
+
+    const node = {
+      id,
+      strand: 'Carry',
+      strandValue: -1,
+      group: 0,
+      x: last.x + 50,
+      y: last.y,
+      z: last.z,
+      tags: ''
+    };
+
+    setRows((r) => [...r, node]);
+    setSelectedId(id);
+    setStatus(`Added node ${id}`);
   }
-
-  // OLD ADD NODE
-  // function addNode() {
-  //   const id = Math.max(-1, ...rows.map((r) => Number(r.id)).filter(Number.isFinite)) + 1;
-  //   const last = rows[rows.length - 1] ?? { x: 0, y: 0, z: 0 };
-
-  //   const node = {
-  //     id,
-  //     strand: 'Carry',
-  //     strandValue: -1,
-  //     group: 0,
-  //     x: last.x + 50,
-  //     y: last.y,
-  //     z: last.z,
-  //     tags: ''
-  //   };
-
-  //   setRows((r) => [...r, node]);
-  //   setSelectedId(id);
-  //   setStatus(`Added node ${id}`);
-  // }
 
   function deleteNode() {
     if (selectedId === null) return;
@@ -1086,25 +1040,6 @@ function App() {
     setSelectedId(null);
     setStatus('Deleted selected node');
   }
-
-  function toggleStrand() {
-    if (selectedId === null) return;
-    
-    setRows((prev) => prev.map((r) => {
-      if (r.id === selectedId) {
-        const isCurrentlyCarry = r.strand === 'Carry';
-        return {
-          ...r,
-          strand: isCurrentlyCarry ? 'Return' : 'Carry',
-          strandValue: isCurrentlyCarry ? 1 : -1, // Carry is -1, Return is 1
-          group: isCurrentlyCarry ? 1 : 0         // Assuming group 1 = Return, 0 = Carry
-        };
-      }
-      return r;
-    }));
-
-    setStatus(`Switched Node ${selectedId} to ${selected?.strand === 'Carry' ? 'Return' : 'Carry'}`);
-}
 
   function exportFile(type) {
     const exportRows = rows.map((r) => ({
@@ -1132,7 +1067,7 @@ function App() {
   return (
     <main className="editor">
       <header className="topbar">
-        <div className="brand">MineSight</div>
+        <div className="brand">VOITH</div>
         <h1>Conveyor Layout Editor</h1>
 
         <div className="summary">
@@ -1159,17 +1094,7 @@ function App() {
           Upload CSV
         </label>
 
-        <button className="primary" onClick={addNode}>+ Add Node</button>
-        {/* NEW TOGGLE BUTTON */}
-        <button 
-            onClick={toggleStrand} 
-            disabled={selectedId === null}
-            style={{ borderLeft: '4px solid #0857f7' }}
-          >
-            ⇄ Switch Strand
-          </button>
-        
-          <label className="tool-btn">
+         <label className="tool-btn">
           <input
             type="file"
             accept="image/png, image/jpeg"
@@ -1184,8 +1109,8 @@ function App() {
           Upload Heightmap
         </label>
 
-        {/* <button className="primary" onClick={addNode}>+ Add Node</button> */}
-                <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
+        <button className="primary" onClick={addNode}>+ Add Node</button>
+        <button className="danger" disabled={selectedId === null} onClick={deleteNode}>
           Delete Node
         </button>
         <button onClick={() => exportFile('csv')}>Export CSV</button>
