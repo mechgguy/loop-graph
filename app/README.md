@@ -31,6 +31,11 @@ Accepted aliases include `x (m)`, `y (m)`, `z (m)`, `type`, `group`, and `elevat
 ## Run
 
 ```bash
+cd loop-graph/app
+
 npm install
+
+chmod +x node_modules/.bin/vite
+
 npm run dev
 ```
