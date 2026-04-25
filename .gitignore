@@ -13,6 +13,11 @@ venv/
 
 # IDE settings
 .vscode/
+
+# node modules
+app/node_modules
+*.gz
+
 app/node_modules/
 node_modules/
 .vite/
