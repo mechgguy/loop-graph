@@ -451,8 +451,28 @@ function createMineGroundTexture() {
   return texture;
 }
 
-function addTerrainMesh(imageUrl = "/Heightmap_Joy2.png") {
-  // Add Terrain Mesh
+function addTerrainMesh(imageUrl = "/Highland_valley.png") {
+  // // Add Terrain Mesh
+  // const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
+  // const material = new THREE.MeshStandardMaterial({
+  //   color: 0x964B00,
+  //   displacementScale: 200, // Adjust based on your heightmap's contrast
+  //   wireframe: true,
+  // });
+
+  // const terrain = new THREE.Mesh(geometry, material);
+  // // terrain.rotation.x = -Math.PI / 2; // Lay on the xz plane by rotating 90 degree
+  // terrain.position.set(0, 0, 0);  // Shift under the conveyor belt
+    
+  // // Loads from the 'public' folder in Vite
+  // const textureLoader = new THREE.TextureLoader();
+  // textureLoader.load(imageUrl, (texture) => {
+  //   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  //   texture.repeat.set(1, 1);
+  //   material.displacementMap = texture;
+  //   material.needsUpdate = true;
+
+    // Add Terrain Mesh
   const geometry = new THREE.PlaneGeometry(1000, 1000, 128, 128);
   const material = new THREE.MeshStandardMaterial({
     color: 0x964B00,
