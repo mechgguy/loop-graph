@@ -3,18 +3,63 @@ from flask_cors import CORS
 import ezdxf
 import io
 import pandas as pd
+import json
 
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route('/import-file', methods=['POST'])
 def import_file():
     try:
         if 'file' not in request.files:
+            print("ERROR: No 'file' key in request.files")
             return jsonify({"error": "No file uploaded"}), 400
             
         file = request.files['file']
+        if file.filename == '':
+            print("ERROR: Filename is empty")
+            return jsonify({"error": "No selected file"}), 400
         filename = file.filename.lower()
+        print(f"DEBUG: Received file: {filename}")
+# HANDLE JSON
+        if filename.endswith('.json'):
+            print("DEBUG: Parsing Graph-style JSON...")
+            try:
+                data = json.load(file)
+            except Exception as e:
+                return jsonify({"error": f"JSON Parse Error: {e}"}), 400
+
+            # Target the 'nodes' key specifically
+            if isinstance(data, dict) and "nodes" in data:
+                raw_nodes = data["nodes"]
+            elif isinstance(data, list):
+                raw_nodes = data
+            else:
+                return jsonify({"error": "JSON structure not recognized. Expected 'nodes' array."}), 400
+
+            nodes = []
+            for i, entry in enumerate(raw_nodes):
+                g = int(entry.get('group', 0))
+                
+                # Handle tags (your JSON has them as a list, React wants a string)
+                raw_tags = entry.get('tags', [])
+                tag_str = "; ".join(raw_tags) if isinstance(raw_tags, list) else str(raw_tags)
+
+                nodes.append({
+                    'id': entry.get('id', i),
+                    'x': float(entry.get('x', 0)),
+                    'y': float(entry.get('y', 0)),
+                    'z': float(entry.get('z', 0)),
+                    'group': g,
+                    'strand': 'Return' if g == 1 else 'Carry',
+                    'strandValue': 1 if g == 1 else -1,
+                    'tags': tag_str,
+                    'fromCsv': True
+                })
+            
+            print(f"DEBUG: Successfully processed {len(nodes)} nodes from nested JSON")
+            return jsonify(nodes)
 
         # --- HANDLE EXCEL (.xlsx, .xls) ---
         if filename.endswith(('.xlsx', '.xls')):
@@ -34,18 +79,6 @@ def import_file():
             # raw_data = df.to_dict(orient='records')
             nodes = []
             
-            # for i, row in enumerate(raw_data):
-            #     # Map Excel columns to our app's schema
-            #     nodes.append({
-            #         'id': row.get('id', i),
-            #         'x': float(row.get('x', 0)),
-            #         'y': float(row.get('y', 0)),
-            #         'z': float(row.get('z', 0)),
-            #         'group': int(row.get('group', 0)),
-            #         'strand': row.get('strand', 'Carry'),
-            #         'tags': str(row.get('tags', '')),
-            #         'fromCsv': True
-            #     })
             for i in range(len(df)):
                 # Access by position: .iloc[row_index, col_index]
                 # 0: id, 1: x, 2: y, 3: z, 4: group, 5: tags
