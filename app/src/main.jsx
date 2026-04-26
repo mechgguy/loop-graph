@@ -1284,7 +1284,40 @@ function App() {
     a.click();
     URL.revokeObjectURL(a.href);
   }
+  // Place this after exportFile(type) { ... }
+  async function handleDxfUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
 
+    setStatus("Sending DXF to Python backend for conversion...");
+    recordHistory(); // Save current state so you can Undo the import
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // Note: Ensure your Python Flask server is running on port 5000
+      const response = await fetch('http://localhost:5000/convert-dxf', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Backend conversion failed. Is the Flask server running?");
+
+      const newRows = await response.json();
+      
+      // Update state with the nodes extracted from CAD
+      setRows(newRows);
+      originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
+      setSelectedIds(new Set());
+      setLastSelectedId(null);
+      setFittedIds(new Set());
+      setStatus(`Successfully imported ${newRows.length} nodes from CAD DXF.`);
+    } catch (err) {
+      console.error(err);
+      setStatus(`CAD Import Error: ${err.message}`);
+    }
+  }
   const terrainFootprint = TERRAIN_SIZE * planeScale;
   const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
 
@@ -1332,6 +1365,16 @@ function App() {
             }, setStatus)
           } />
           Upload CSV
+        </label>
+        {/* NEW DXF BUTTON */}
+        <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white' }}>
+          <input 
+            type="file" 
+            accept=".dxf" 
+            onChange={handleDxfUpload} 
+            style={{ display: 'none' }} 
+          />
+          📐 Import CAD (DXF)
         </label>
         <button className="primary" onClick={addNodeAfter} disabled={lastSelectedId === null}
           style={{ backgroundColor: '#2e7d32' }}>
