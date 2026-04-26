@@ -1756,8 +1756,13 @@ function App() {
       }, setStatus);
     } 
     
-    // CASE 2: DXF FILE (Python Backend)
-    else if (fileName.endsWith('.dxf') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+// CASE 2: BACKEND FILES (DXF, Excel, and now JSON)
+    else if (
+      fileName.endsWith('.dxf') || 
+      fileName.endsWith('.xlsx') || 
+      fileName.endsWith('.xls') || 
+      fileName.endsWith('.json') // Added JSON support
+    ) {
       setStatus(`Processing ${file.name} via Python backend...`);
       const formData = new FormData();
       formData.append('file', file);
@@ -1768,21 +1773,29 @@ function App() {
           body: formData,
         });
 
-        if (!response.ok) throw new Error("Backend failed to process file.");
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Backend failed to process file.");
+        }
 
         const newRows = await response.json();
+        
+        // Update ID generator to prevent conflicts
+        nextNodeIdRef.current = Math.max(0, ...newRows.map(r => Number(r.id) || 0)) + 1;
+        
         setRows(newRows);
         originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
         setFittedIds(new Set());
+        setSelectedIds(new Set());
+        setLastSelectedId(null);
         setStatus(`Imported ${newRows.length} nodes from ${fileName.split('.').pop().toUpperCase()}.`);
       } catch (err) {
         setStatus(`Import Error: ${err.message}`);
       }
     } else {
-      setStatus("Unsupported file type. Use .csv, .dxf, or .xlsx");
-    }
-    // Reset the input so the same file can be uploaded again if needed
-    event.target.value = '';
+      setStatus("Unsupported file type. Use .csv, .dxf, .xlsx, or .json");
+  }
+  event.target.value = '';
   }
   const terrainFootprint = TERRAIN_SIZE * planeScale;
   const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
@@ -1837,11 +1850,11 @@ function App() {
         <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white', fontWeight: 'bold' }}>
             <input 
               type="file" 
-              accept=".csv, .dxf, .xlsx, .xls" 
+              accept=".csv, .dxf, .xlsx, .xls .json" 
               onChange={handleFileUpload} 
               style={{ display: 'none' }} 
             />
-            📥 Import Data (CSV/DXF/XLSX)
+            📥 Import Data (CSV/DXF/XLSX/XLS/JSON)
         </label>
         {/* {/* NEW DXF BUTTON */}
         {/* <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white' }}>
