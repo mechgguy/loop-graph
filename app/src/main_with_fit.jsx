@@ -1703,38 +1703,86 @@ function App() {
     URL.revokeObjectURL(a.href);
   }
   // Place this after exportFile(type) { ... }
-  async function handleDxfUpload(event) {
+  // async function handleDxfUpload(event) {
+  //   const file = event.target.files[0];
+  //   if (!file) return;
+
+  //   setStatus("Sending DXF to Python backend for conversion...");
+  //   recordHistory(); // Save current state so you can Undo the import
+
+  //   const formData = new FormData();
+  //   formData.append('file', file);
+
+  //   try {
+  //     // Note: Ensure your Python Flask server is running on port 5000
+  //     const response = await fetch('http://localhost:5000/convert-dxf', {
+  //       method: 'POST',
+  //       body: formData,
+  //     });
+
+  //     if (!response.ok) throw new Error("Backend conversion failed. Is the Flask server running?");
+
+  //     const newRows = await response.json();
+      
+  //     // Update state with the nodes extracted from CAD
+  //     setRows(newRows);
+  //     originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
+  //     setSelectedIds(new Set());
+  //     setLastSelectedId(null);
+  //     setFittedIds(new Set());
+  //     setStatus(`Successfully imported ${newRows.length} nodes from CAD DXF.`);
+  //   } catch (err) {
+  //     console.error(err);
+  //     setStatus(`CAD Import Error: ${err.message}`);
+  //   }
+  // }
+  async function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    setStatus("Sending DXF to Python backend for conversion...");
-    recordHistory(); // Save current state so you can Undo the import
+    const fileName = file.name.toLowerCase();
+    recordHistory(); // Enable Undo for both types
 
-    const formData = new FormData();
-    formData.append('file', file);
+    // CASE 1: CSV FILE (Local Parsing)
+    if (fileName.endsWith('.csv')) {
+      setStatus(`Parsing CSV: ${file.name}...`);
+      parseCsvFile(file, (newRows) => {
+        originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
+        setRows(newRows);
+        setFittedIds(new Set());
+        setSelectedIds(new Set());
+        setLastSelectedId(null);
+        setStatus(`Imported ${newRows.length} nodes from CSV.`);
+      }, setStatus);
+    } 
+    
+    // CASE 2: DXF FILE (Python Backend)
+    else if (fileName.endsWith('.dxf') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      setStatus(`Processing ${file.name} via Python backend...`);
+      const formData = new FormData();
+      formData.append('file', file);
 
-    try {
-      // Note: Ensure your Python Flask server is running on port 5000
-      const response = await fetch('http://localhost:5000/convert-dxf', {
-        method: 'POST',
-        body: formData,
-      });
+      try {
+        const response = await fetch('http://localhost:5000/import-file', {
+          method: 'POST',
+          body: formData,
+        });
 
-      if (!response.ok) throw new Error("Backend conversion failed. Is the Flask server running?");
+        if (!response.ok) throw new Error("Backend failed to process file.");
 
-      const newRows = await response.json();
-      
-      // Update state with the nodes extracted from CAD
-      setRows(newRows);
-      originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
-      setSelectedIds(new Set());
-      setLastSelectedId(null);
-      setFittedIds(new Set());
-      setStatus(`Successfully imported ${newRows.length} nodes from CAD DXF.`);
-    } catch (err) {
-      console.error(err);
-      setStatus(`CAD Import Error: ${err.message}`);
+        const newRows = await response.json();
+        setRows(newRows);
+        originalRowsRef.current = JSON.parse(JSON.stringify(newRows));
+        setFittedIds(new Set());
+        setStatus(`Imported ${newRows.length} nodes from ${fileName.split('.').pop().toUpperCase()}.`);
+      } catch (err) {
+        setStatus(`Import Error: ${err.message}`);
+      }
+    } else {
+      setStatus("Unsupported file type. Use .csv, .dxf, or .xlsx");
     }
+    // Reset the input so the same file can be uploaded again if needed
+    event.target.value = '';
   }
   const terrainFootprint = TERRAIN_SIZE * planeScale;
   const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
@@ -1772,7 +1820,7 @@ function App() {
           }} style={{ display: 'none' }} />
           Upload Heightmap
         </label>
-        <label className="tool-btn">
+        {/* <label className="tool-btn">
           <input type="file" accept=".csv,text/csv" onChange={(e) =>
             e.target.files?.[0] &&
             parseCsvFile(e.target.files[0], (newRows) => {
@@ -1784,9 +1832,19 @@ function App() {
             }, setStatus)
           } />
           Upload CSV
+        </label> */}
+        {/* UNIFIED IMPORT BUTTON */}
+        <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white', fontWeight: 'bold' }}>
+            <input 
+              type="file" 
+              accept=".csv, .dxf, .xlsx, .xls" 
+              onChange={handleFileUpload} 
+              style={{ display: 'none' }} 
+            />
+            📥 Import Data (CSV/DXF/XLSX)
         </label>
-        {/* NEW DXF BUTTON */}
-        <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white' }}>
+        {/* {/* NEW DXF BUTTON */}
+        {/* <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white' }}>
           <input 
             type="file" 
             accept=".dxf" 
@@ -1794,7 +1852,7 @@ function App() {
             style={{ display: 'none' }} 
           />
           📐 Import CAD (DXF)
-        </label>
+        </label> */}
         <button className="primary" onClick={addNodeAfter} disabled={lastSelectedId === null}
           style={{ backgroundColor: '#2e7d32' }}>
           + Insert After ({lastSelectedId ?? '?'})
@@ -1868,5 +1926,4 @@ function App() {
     </main>
   );
 }
-
 createRoot(document.getElementById('root')).render(<App />);
