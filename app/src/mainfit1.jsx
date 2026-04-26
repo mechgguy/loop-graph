@@ -886,7 +886,7 @@ function buildConveyor(scene, lineRows, strand, toVec, selectedId) {
 }
 
 // --- View3D (merged: grid constants, terrain hint, two-scale, but multi-select from 3D click is single select) ---
-function View3D({ rows, selectedId, onSelect, planeScale, zScale, heightmapUrl }) {
+function View3D({ rows, selectedId, selectedIds, onSelect, planeScale, zScale, heightmapUrl }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
@@ -1073,6 +1073,39 @@ function View3D({ rows, selectedId, onSelect, planeScale, zScale, heightmapUrl }
     });
   }, [heightmapUrl]);
 
+  useEffect(() => {
+    function handleKeyDown(e) {
+      // 1. CTRL + Z (Undo)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undo();
+      }
+  
+      // 2. Select All (Alt + A)
+      if (e.altKey && e.key === 'a') {
+        e.preventDefault();
+        if (rows.length > 0) {
+          const allIds = new Set(rows.map(r => r.id));
+          setSelectedIds(allIds);
+          setLastSelectedId(rows[rows.length - 1].id);
+          setStatus(`Selected all ${rows.length} nodes`);
+        }
+      }
+  
+      // 3. Delete / Backspace
+      if ((e.key === 'Delete' || e.key === 'Backspace') &&
+          e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (selectedIds.size > 0) {
+          recordHistory(); // Record before deleting
+          deleteNode();
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [rows, selectedIds, history]); // Added history to deps
+
   const terrainFootprint = TERRAIN_SIZE * planeScale;
   const terrainHeightRange = TERRAIN_DISPLACEMENT_SCALE * zScale;
 
@@ -1177,6 +1210,7 @@ function App() {
   const [planeScale, setPlaneScale] = useState(1);
   const [zScale, setZScale] = useState(1);
   const nextNodeIdRef = useRef(0);
+  const [history, setHistory] = useState([]);
 
   // Load default CSV
   useEffect(() => {
@@ -1215,7 +1249,6 @@ function App() {
           setStatus(`Selected all ${rows.length} nodes`);
         }
       }
-      recordHistory();
       if ((e.key === 'Delete' || e.key === 'Backspace') &&
           e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
         e.preventDefault();
@@ -1293,7 +1326,6 @@ function App() {
   }
 
   function updateMultipleNodes(nodeUpdates) {
-    recordHistory();
     setRows(prev => {
       const movedRows = prev.filter(r => nodeUpdates.has(r.id) && shouldWarnAboutBeltMove(r, nodeUpdates.get(r.id)));
       if (movedRows.length > 0) setStatus(`⚠️ WARNING: Moving ${movedRows.length} belt node(s). Check corresponding Carry/Return nodes.`);
@@ -1308,7 +1340,7 @@ function App() {
 
   // Update single node
   function updateNode(id, patch) {
-    recordHistory(); 
+    recordHistory();
     setRows(prev => {
       const target = prev.find(r => r.id === id);
       if (shouldWarnAboutBeltMove(target, patch)) showBeltMoveWarning(target);
@@ -1374,7 +1406,6 @@ function App() {
       setStatus("Workspace cleared.");
     }
   }
-
   function isBeltNode(row) {
     return String(row.tags ?? '').toLowerCase().split(/[;,\s]+/).includes(BELT_TAG) || row.beltPairId !== undefined;
   }
@@ -1725,11 +1756,8 @@ function App() {
       }, setStatus);
     } 
     
-    // CASE 2: OTHER FILES (Python Backend)
-    else if (fileName.endsWith('.dxf') ||
-      fileName.endsWith('.xlsx') ||
-      fileName.endsWith('.xls') ||
-      fileName.endsWith('.json')) {
+    // CASE 2: DXF FILE (Python Backend)
+    else if (fileName.endsWith('.dxf') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
       setStatus(`Processing ${file.name} via Python backend...`);
       const formData = new FormData();
       formData.append('file', file);
@@ -1804,17 +1832,27 @@ function App() {
             }, setStatus)
           } />
           Upload CSV
-        </label>  */}
+        </label> */}
         {/* UNIFIED IMPORT BUTTON */}
         <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white', fontWeight: 'bold' }}>
             <input 
               type="file" 
-              accept=".csv, .dxf, .xlsx, .xls .json" 
+              accept=".csv, .dxf, .xlsx, .xls" 
               onChange={handleFileUpload} 
               style={{ display: 'none' }} 
             />
-            📥 Import Data (CSV/DXF/XLSX/JSON)
+            📥 Import Data (CSV/DXF/XLSX)
         </label>
+        {/* {/* NEW DXF BUTTON */}
+        {/* <label className="tool-btn" style={{ backgroundColor: '#4f46e5', color: 'white' }}>
+          <input 
+            type="file" 
+            accept=".dxf" 
+            onChange={handleDxfUpload} 
+            style={{ display: 'none' }} 
+          />
+          📐 Import CAD (DXF)
+        </label> */}
         <button className="primary" onClick={addNodeAfter} disabled={lastSelectedId === null}
           style={{ backgroundColor: '#2e7d32' }}>
           + Insert After ({lastSelectedId ?? '?'})
@@ -1835,7 +1873,20 @@ function App() {
           <input type="number" min="0" max="20" step="0.05" value={zScale}
             onChange={(e) => updateZScale(e.target.value)} />
         </label>
+        <button 
+        className="danger" 
+        onClick={clearAllNodes}
+        style={{ marginLeft: '10px' }}
+      >
+        🗑️ Clear All
+      </button>
 
+      <button 
+        onClick={undo} 
+        disabled={history.length === 0}
+      >
+        ↩️ Undo (Ctrl+Z)
+      </button>
         <button onClick={resetAll}>RESET ALL</button>
         <button className="primary" onClick={addNode}>+ Add Node</button>
         <button className="primary" onClick={addBeltNode}>+ Add Belt Node</button>
