@@ -52,6 +52,13 @@ tests/
 | `.cumulative_elevation_profile()` | (N+1, 2) unrolled [distance, z] |
 | `.to_node_link()` | NetworkX-compatible JSON dict |
 
+### AMT Hackathon MineSight
+
+```bash
+
+cd app
+```
+
 ## License
 
 MIT

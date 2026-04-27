@@ -21,36 +21,97 @@ def import_file():
             print("ERROR: Filename is empty")
             return jsonify({"error": "No selected file"}), 400
         filename = file.filename.lower()
-        print(f"DEBUG: Received file: {filename}")
-# HANDLE JSON
+        # print(f"DEBUG: Received file: {filename}")
+        # HANDLE JSON
+        # if filename.endswith('.json'):
+        #     print("DEBUG: Parsing Graph-style JSON...")
+        #     try:
+        #         data = json.load(file)
+        #     except Exception as e:
+        #         return jsonify({"error": f"JSON Parse Error: {e}"}), 400
+
+        #     # Target the 'nodes' key specifically
+        #     if isinstance(data, dict) and "nodes" in data:
+        #         raw_nodes = data["nodes"]
+        #     elif isinstance(data, list):
+        #         raw_nodes = data
+        #     else:
+        #         return jsonify({"error": "JSON structure not recognized. Expected 'nodes' array."}), 400
+
+        #     nodes = []
+        #     for i, entry in enumerate(raw_nodes):
+        #         g = int(entry.get('group', 0))
+                
+        #         # Handle tags (your JSON has them as a list, React wants a string)
+        #         raw_tags = entry.get('tags', [])
+        #         tag_str = "; ".join(raw_tags) if isinstance(raw_tags, list) else str(raw_tags)
+
+        #         nodes.append({
+        #             'id': entry.get('id', i),
+        #             'x': float(entry.get('x', 0)),
+        #             'y': float(entry.get('y', 0)),
+        #             'z': float(entry.get('z', 0)),
+        #             'group': g,
+        #             'strand': 'Return' if g == 1 else 'Carry',
+        #             'strandValue': 1 if g == 1 else -1,
+        #             'tags': tag_str,
+        #             'fromCsv': True
+        #         })
+            
+        #     print(f"DEBUG: Successfully processed {len(nodes)} nodes from nested JSON")
+        #     return jsonify(nodes)
+
+# --- HANDLE JSON (.json) ---
         if filename.endswith('.json'):
-            print("DEBUG: Parsing Graph-style JSON...")
+            # print("DEBUG: Parsing JSON content...")
             try:
                 data = json.load(file)
             except Exception as e:
-                return jsonify({"error": f"JSON Parse Error: {e}"}), 400
+                return jsonify({"error": f"JSON Decode Error: {e}"}), 400
 
-            # Target the 'nodes' key specifically
-            if isinstance(data, dict) and "nodes" in data:
-                raw_nodes = data["nodes"]
-            elif isinstance(data, list):
+            # --- RESILIENT NODE HUNTING ---
+            raw_nodes = None
+            
+            if isinstance(data, list):
                 raw_nodes = data
-            else:
-                return jsonify({"error": "JSON structure not recognized. Expected 'nodes' array."}), 400
+            elif isinstance(data, dict):
+                # Check top level
+                if "nodes" in data:
+                    raw_nodes = data["nodes"]
+                # Check Cytoscape/Nested level (Example 3 fix)
+                elif "elements" in data and "nodes" in data["elements"]:
+                    raw_nodes = data["elements"]["nodes"]
+                # Fallback: search all keys for a list that looks like nodes
+                else:
+                    for key, value in data.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            raw_nodes = value
+                            break
+
+            if raw_nodes is None:
+                return jsonify({"error": "JSON structure not recognized. Could not find a 'nodes' list."}), 400
 
             nodes = []
             for i, entry in enumerate(raw_nodes):
-                g = int(entry.get('group', 0))
+                # Handle Example 3 nesting: {"data": {"id": ...}}
+                # If 'data' key exists, use it; otherwise, use the entry itself.
+                props = entry.get('data', entry) if isinstance(entry, dict) else {}
                 
-                # Handle tags (your JSON has them as a list, React wants a string)
-                raw_tags = entry.get('tags', [])
+                # Standardize Group (Handling potential string/int mix)
+                try:
+                    g = int(props.get('group', 0))
+                except:
+                    g = 0
+
+                # Standardize Tags (Handling list vs string)
+                raw_tags = props.get('tags', [])
                 tag_str = "; ".join(raw_tags) if isinstance(raw_tags, list) else str(raw_tags)
 
                 nodes.append({
-                    'id': entry.get('id', i),
-                    'x': float(entry.get('x', 0)),
-                    'y': float(entry.get('y', 0)),
-                    'z': float(entry.get('z', 0)),
+                    'id': props.get('id', i),
+                    'x': float(props.get('x', 0)),
+                    'y': float(props.get('y', 0)),
+                    'z': float(props.get('z', 0)),
                     'group': g,
                     'strand': 'Return' if g == 1 else 'Carry',
                     'strandValue': 1 if g == 1 else -1,
@@ -58,7 +119,7 @@ def import_file():
                     'fromCsv': True
                 })
             
-            print(f"DEBUG: Successfully processed {len(nodes)} nodes from nested JSON")
+            # print(f"DEBUG: Successfully processed {len(nodes)} JSON nodes")
             return jsonify(nodes)
 
         # --- HANDLE EXCEL (.xlsx, .xls) ---

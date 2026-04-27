@@ -1,0 +1,29 @@
+{
+    "directed": true,
+    "multigraph": false,
+    "graph": {
+      "name": "Primary Decline Conveyor",
+      "description": "Standard 500m decline with carry and return strands"
+    },
+    "nodes": [
+      { "id": 101, "x": 0, "y": 0, "z": 100, "group": 0, "tags": ["Head-Drive", "Carry"] },
+      { "id": 102, "x": 150, "y": 20, "z": 85, "group": 0, "tags": ["Carry"] },
+      { "id": 103, "x": 300, "y": 50, "z": 60, "group": 0, "tags": ["Carry"] },
+      { "id": 104, "x": 500, "y": 100, "z": 30, "group": 0, "tags": ["Tail-Loading", "Carry"] },
+      
+      { "id": 201, "x": 500, "y": 100, "z": 28, "group": 1, "tags": ["Tail-Pulley", "Return"] },
+      { "id": 202, "x": 300, "y": 50, "z": 58, "group": 1, "tags": ["Return"] },
+      { "id": 203, "x": 150, "y": 20, "z": 83, "group": 1, "tags": ["Return"] },
+      { "id": 204, "x": 0, "y": 0, "z": 98, "group": 1, "tags": ["Take-up", "Return"] }
+    ],
+    "links": [
+      { "source": 101, "target": 102 },
+      { "source": 102, "target": 103 },
+      { "source": 103, "target": 104 },
+      { "source": 104, "target": 201 },
+      { "source": 201, "target": 202 },
+      { "source": 202, "target": 203 },
+      { "source": 203, "target": 204 },
+      { "source": 204, "target": 101 }
+    ]
+  }
