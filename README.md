@@ -59,6 +59,14 @@ tests/
 cd app
 ```
 
+### MineSight: 3D Conveyor Layout Editor
+
+> A technical implementation for the AMT Hackathon.
+
+#### 🕹️ Live Demo
+
+![MineSight Demo](Peek 2026-04-26 12-28.mp4)
+
 ## License
 
 MIT
