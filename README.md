@@ -64,12 +64,8 @@ cd app
 > A technical implementation for the AMT Hackathon.
 
 #### 🕹️ Live Demo
+https://github.com/user-attachments/assets/ddaf4bba-14a1-403f-88ce-df3e1746e263
 
-<p align="center">
-  <video src="Peek_2026-04-26_12-28.mp4" width="100%" autoplay muted loop controls>
-    Your browser does not support the video tag.
-  </video>
-</p>
 
 ## License
 
