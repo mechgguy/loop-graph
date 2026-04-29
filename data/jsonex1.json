@@ -1,0 +1,13 @@
+{
+    "directed": true,
+    "multigraph": false,
+    "graph": {},
+    "nodes": [
+      { "id": "Main_A1", "x": 100.5, "y": 200.0, "z": 5.0, "group": 0, "tags": ["incline"] },
+      { "id": "Main_A2", "x": 150.0, "y": 200.0, "z": 12.0, "group": 0, "tags": [] },
+      { "id": "Return_B1", "x": 100.5, "y": 200.0, "z": -5.0, "group": 1, "tags": ["return-line"] }
+    ],
+    "links": [
+      { "source": "Main_A1", "target": "Main_A2" }
+    ]
+  }

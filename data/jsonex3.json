@@ -1,0 +1,26 @@
+{
+    "elements": {
+      "nodes": [
+        {
+          "data": {
+            "id": "node_99",
+            "x": 450.0,
+            "y": -120.5,
+            "z": 33.0,
+            "group": 1,
+            "tags": "complex-nesting"
+          }
+        },
+        {
+          "data": {
+            "id": "node_100",
+            "x": 550.0,
+            "y": -120.5,
+            "z": 30.0,
+            "group": 1,
+            "tags": "junction-point"
+          }
+        }
+      ]
+    }
+  }
