@@ -65,7 +65,11 @@ cd app
 
 #### 🕹️ Live Demo
 
-![MineSight Demo](Peek 2026-04-26 12-28.mp4)
+<p align="center">
+  <video src="Peek_2026-04-26_12-28.mp4" width="100%" autoplay muted loop controls>
+    Your browser does not support the video tag.
+  </video>
+</p>
 
 ## License
 
